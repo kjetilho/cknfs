@@ -11,12 +11,13 @@
  * to dead NFS servers are ignored.  The remaining paths are printed to
  * stdout.  No more hung logins!
  *
- * Usage: cknfs -e -s -t# -v -D -L paths
+ * Usage: cknfs -e -s -t# -u -v -D -L paths
  *  
  *       -e     silent, do not print paths
  *       -s     print paths in sh format (colons)
  *       -t n   timeout interval before assuming an NFS
  *              server is dead (default 10 seconds)
+ *       -u     unique paths
  *       -v     verbose
  *       -D     debug
  *       -L     expand symbolic links
@@ -67,7 +68,19 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.4  1993/02/25 17:41:00  anders
+ * Revision 1.5  1993/09/28 23:09:36  karlo
+ * "-u" opsjon lagt inn - skriv kun ut unike katalognamn. Symbolske linkar
+ * vert ekspanderte.
+ * Bug-fiksing:
+ *  - Kun "/" vart til "" (dvs. i praksis ".")
+ *  - symbolske linkar som peikte p} kvarandre fekk cknfs til } g} i evig l|kke.
+ *    No kan ein maks ha 64 niv} med symbolske linkar f|r den g}r vidare.
+ *  - relative katalognamn var relative i h|ve den f|rre katalogen i lista.
+ *  - "-L" ekspanderte "." No f}r katalognamn som byrjar med "." f} vere i
+ *    fred. Katalognamn som korkje byrjar med "." eller "/" er relative og
+ *    vert ekspanderte.
+ *
+ * Revision 1.4  1993/02/25  17:41:00  anders
  * OSF/1 port
  *
  * Revision 1.3  1992/10/29  14:56:45  obh
@@ -155,12 +168,13 @@ struct m_mlist {
 static struct m_mlist *firstmnt;
 
 static int errflg;
-static int eflg, sflg, vflg, Dflg, Lflg;
+static int eflg, sflg, vflg, Dflg, Lflg, uflg;
 static int timeout = DEFAULT_TIMEOUT;
 static char prefix[MAXPATHLEN];
 struct m_mlist *isnfsmnt();
 char *xalloc();
 void mkm_mlist();
+int unique();
 
 int
 main(argc, argv)
@@ -174,7 +188,7 @@ char **argv;
 	char errbuf[BUFSIZ];
 	extern int optind;
 	extern char *optarg;
-
+	char **newargv;
 
 	/*
 	 * Avoid intermixing stdout and stderr
@@ -182,7 +196,7 @@ char **argv;
 	setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf));
 	setvbuf(stderr, errbuf, _IOLBF, sizeof(errbuf));
 
-	while ((n = getopt(argc, argv, "est:vDL")) != EOF)
+	while ((n = getopt(argc, argv, "est:uvDL")) != EOF)
 		switch(n) {
 			case 'e':	++eflg;
 					break;
@@ -191,6 +205,9 @@ char **argv;
 					break;
 
 			case 't':	timeout = atoi(optarg);
+					break;
+
+			case 'u':	++uflg;
 					break;
 
 			case 'v':	++vflg;
@@ -210,32 +227,41 @@ char **argv;
 		++errflg;
 
 	if (errflg) {
-		fprintf(stderr, "Usage: %s -e -s -t# -v -D -L paths\n", argv[0]);
+		fprintf(stderr, "Usage: %s -e -s -t# -u -v -D -L paths\n", argv[0]);
 		fprintf(stderr, "\tCheck paths for dead NFS servers\n");
 		fprintf(stderr, "\tGood paths are printed to stdout\n\n");
 		fprintf(stderr, "\t -e\tsilent, do not print paths\n");
 		fprintf(stderr, "\t -s\tprint paths in sh format (semicolons)\n");
 		fprintf(stderr, "\t -t n\ttimeout interval before assuming an NFS\n");
 		fprintf(stderr, "\t\tserver is dead (default 10 seconds)\n");
+		fprintf(stderr, "\t -u\tunique paths\n");
 		fprintf(stderr, "\t -v\tverbose\n");
 		fprintf(stderr, "\t -D\tdebug\n");
 		fprintf(stderr, "\t -L\texpand symbolic links\n\n");
 		exit(1);
 	}
 
+	if (uflg)
+	        newargv = (char **) xalloc((argc - optind) * sizeof(char *));
+
 	for (n = optind; n < argc; ++n) {
 		s = argv[n];
 		if (Dflg)
 			fprintf(stderr, "chkpath(%s)\n", s);
 		if (chkpath(s)) {
+		        if (!unique(n - optind, newargv))
+			        continue;
 			if (good++ && !eflg)
 				putchar(sflg ? ':' : ' ');
 			if (!eflg)
-				fputs(Lflg ? prefix : s, stdout);
-		} else
+				fputs(Lflg && *s != '.' ? prefix : s, stdout);
+		} else {
+		        if (uflg)
+			        newargv[n - optind] = NULL;
 			if (vflg)
 				fprintf(stderr, "path skipped: %s\n",
-					Lflg ? prefix : s);
+					Lflg && *s != '.' ? prefix : s);
+		}
 	}
 
 	if (good && !eflg)
@@ -247,30 +273,62 @@ char **argv;
 	exit(good == 0 && optind < argc );
 }
 
+int
+unique(n, newargv)
+int n;
+char **newargv;
+{
+        int i;
 
-int chkpath(path)
+	if (!uflg)
+	        return 1;
+
+	newargv[n] = xalloc(strlen(prefix) + 1);
+	strcpy(newargv[n], prefix);
+	for (i = 0; i < n; i++)
+	        if (newargv[i])
+		        if (strcmp(newargv[i], newargv[n]) == 0)
+			        return 0;
+	return 1;
+}
+
+int
+chkpath(path)
 /*
  * Check path for accessibility.  Return 1 if ok, 0 if error
  */
 char *path;
 {
 	extern char *getwd();
+	char pwd[MAXPATHLEN];
+	int ret;
 
-	if (*path != '/') { /* If not absolute path, get initial prefix */
-		if (getwd(prefix) == NULL) {
-			fprintf(stderr, "%s\n", prefix);
-			return 0;
-		}
+	if (getwd(pwd) == NULL) {
+		fprintf(stderr, "%s\n", pwd);
+		return 0;
 	}
-	return(_chkpath(path));
-}
+	if (*path != '/')   /* If not absolute path, get initial prefix */
+		strcpy(prefix, pwd);
 
+	/* Allow maximum 64 levels of symbolic links */
+	ret = _chkpath(path, 64);
+	
+	/* "/" becomes "", crude fix */
+	if (prefix[0] == 0)
+	        strcpy(prefix, "/");
+
+	/* restore cwd so relative paths work next time around */
+	chdir(pwd);
+	
+	return ret;
+}
 
 #define NTERMS 256
 
 int
-_chkpath(path)
+_chkpath(path, maxdepth)
 char *path;
+int maxdepth;
 {
 	register char *s, *s2;
 	register int i, front=0, back=0;
@@ -279,8 +337,13 @@ char *path;
 	char p[MAXPATHLEN];
 	char symlink[MAXPATHLEN];
 	char *queue[NTERMS];
+	static int depth = 0;
 
-
+	if (maxdepth == 0) {
+		fprintf(stderr,
+			"%s: Too many levels of symbolic links\n", path);
+		return 0;
+	}
 	/*
 	 * Copy path to working storage
 	 */
@@ -363,7 +426,8 @@ char *path;
 		/*
 		 * Recursively check symlink
 		 */
-		if (_chkpath(symlink) == 0)
+
+		if (_chkpath(symlink, maxdepth-1) == 0)
 			return 0;
 	}
 

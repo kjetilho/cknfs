@@ -22,6 +22,10 @@ Print paths in
 .I sh
 format, with colons as separators.
 .TP
+\fB-u\fR
+Unique paths.  Keep only the first pathname when several paths reference
+the same directory.  Symbolic links are de-referenced before comparison.
+.TP
 \fB-t \fItimeout\fR
 Specify the timeout interval before assuming an NFS server is dead.
 The default is 10 seconds.
