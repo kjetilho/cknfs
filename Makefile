@@ -2,7 +2,10 @@
 # $Header$
 #
 # $Log$
-# Revision 1.2  1992/10/24 03:01:00  obh
+# Revision 1.3  1992/10/29 14:56:42  obh
+# portet cknfs til NeXT.
+#
+# Revision 1.2  1992/10/24  03:01:00  obh
 # Fikset litt p} cknfs slik at den kompilerer greit p} SGI og HP.
 # Klarte ikke } logge meg inn p} NeXT maskinen.
 #
@@ -28,10 +31,10 @@ LIBS=
 #EXTRAOBJS=
 #LIBS= -lsun -lbsd
 
-###  Sun and the rest of the lot
-#CFLAGS = -O
-#EXTRAOBJS=
-#LIBS=
+###  Sun, Ultrix, NeXT and the rest of the lot
+CFLAGS = -O
+EXTRAOBJS=
+LIBS=
 
 ###  Where executable should be put
 DESTDIR	= /local/bin

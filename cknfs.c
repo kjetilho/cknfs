@@ -67,7 +67,10 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.2  1992/10/24 03:01:02  obh
+ * Revision 1.3  1992/10/29 14:56:45  obh
+ * portet cknfs til NeXT.
+ *
+ * Revision 1.2  1992/10/24  03:01:02  obh
  * Fikset litt p} cknfs slik at den kompilerer greit p} SGI og HP.
  * Klarte ikke } logge meg inn p} NeXT maskinen.
  *
@@ -131,7 +134,7 @@ static char *RCSid = "$Header$";
 
 #define DEFAULT_TIMEOUT 10  /* Default timeout for checking NFS server */
 
-#ifndef sgi
+#if !defined(sgi) && !defined(NeXT)
 extern char *realloc();
 #endif
 extern char *strchr(), *strrchr(), *strtok();
@@ -535,7 +538,9 @@ xalloc(size)
 int size;
 {
 	register char *mem;
+#ifndef __STDC__
 	char *malloc();
+#endif
 	
 	if ((mem = (char *)malloc((unsigned)size)) == NULL) {
 		(void) fprintf(stderr, "out of memory\n");
@@ -548,7 +553,7 @@ int size;
  * Begin machine dependent code for mount table 
  */
 
-#if defined(sun) || defined(sgi) || defined(__hpux)
+#if defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT)
 #include <mntent.h>
 void
 mkm_mlist()
