@@ -67,7 +67,10 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.3  1992/10/29 14:56:45  obh
+ * Revision 1.4  1993/02/25 17:41:00  anders
+ * OSF/1 port
+ *
+ * Revision 1.3  1992/10/29  14:56:45  obh
  * portet cknfs til NeXT.
  *
  * Revision 1.2  1992/10/24  03:01:02  obh
@@ -120,6 +123,9 @@ static char *RCSid = "$Header$";
 #include "rpc/pmap_prot.h"
 #include "rpc/pmap_clnt.h"
 #ifndef sgi /* sgi is missing nfs.h for some reason */
+#ifdef __osf__
+#include <sys/mount.h>
+#endif
 #include "nfs/nfs.h"
 #else
 	/* sgi is missing nfs.h, so we must hardcode the RPC values */
@@ -582,9 +588,7 @@ mkm_mlist()
 	}
 	(void) endmntent(mounted);
 }
-#endif
-
-#if defined(ultrix)
+#elif defined(ultrix)
 #include <sys/fs_types.h>
 #include <sys/mount.h>
 void
@@ -615,4 +619,31 @@ mkm_mlist()
 		exit(1);
 	}
 }
+#elif defined (__osf__)
+#include <sys/mount.h>
+void
+mkm_mlist()
+{
+	struct statfs *fs;
+	int i;
+	int max;
+	struct m_mlist *mlist;
+	max = getfsstat ((struct statfs *)0, 0 , MNT_NOWAIT);
+	fs = (struct statfs *) xalloc (sizeof(struct statfs)*max);
+	max = getfsstat(fs, sizeof(struct statfs)*max, MNT_NOWAIT);
+	for (i = 0; i < max; i++) {
+		mlist = (struct m_mlist *)xalloc(sizeof(struct m_mlist));
+		mlist->mlist_next = firstmnt;
+		mlist->mlist_checked = 0;
+		mlist->mlist_dir = xalloc (strlen (fs[i].f_mntonname) + 1);
+		(void) strcpy (mlist->mlist_dir, fs[i].f_mntonname);
+		mlist->mlist_fsname = xalloc (strlen (fs[i].f_mntfromname) + 1);
+		(void) strcpy (mlist->mlist_fsname, fs[i].f_mntfromname);
+		mlist->mlist_isnfs = (fs[i].f_type == MOUNT_NFS);
+                firstmnt = mlist;
+	}
+	free((char *)fs);
+}
+#else
+	UNDEFINED_mkm_mlist
 #endif

@@ -2,7 +2,10 @@
 # $Header$
 #
 # $Log$
-# Revision 1.3  1992/10/29 14:56:42  obh
+# Revision 1.4  1993/02/25 17:40:58  anders
+# OSF/1 port
+#
+# Revision 1.3  1992/10/29  14:56:42  obh
 # portet cknfs til NeXT.
 #
 # Revision 1.2  1992/10/24  03:01:00  obh
@@ -22,19 +25,24 @@
 SHELL	= /bin/sh
 
 ### HP-UX
-CFLAGS = -D_XPG2
-EXTRAOBJS= getwd.o
-LIBS=
+#CFLAGS = -D_XPG2
+#EXTRAOBJS= getwd.o
+#LIBS=
 
 ### SGI
 #CFLAGS = -O -I. -I/usr/include/sun -I/usr/include/bsd
 #EXTRAOBJS=
 #LIBS= -lsun -lbsd
 
-###  Sun, Ultrix, NeXT and the rest of the lot
-CFLAGS = -O
+# OSF/1
+CFLAGS = -std -g
 EXTRAOBJS=
 LIBS=
+
+###  Sun, Ultrix, NeXT and the rest of the lot
+#CFLAGS = -g
+#EXTRAOBJS=
+#LIBS=
 
 ###  Where executable should be put
 DESTDIR	= /local/bin
