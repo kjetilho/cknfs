@@ -68,7 +68,13 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.7  1995/02/08 22:50:31  obh
+ * Revision 1.8  1995/04/04 23:05:42  kjetilho
+ * Fiksa slik at directory-namn med kolon i vert automagisk splitta opp.
+ * Fiksa også bug med at "." vart fjerna om cwd låg før i PATH og
+ * -u-opsjonen var i effekt. Ei bieffekt er at multiple "." i PATH får vere
+ * i fred. So what.
+ *
+ * Revision 1.7  1995/02/08  22:50:31  obh
  * solaris port.
  *
  * Revision 1.6  1993/12/10  00:39:09  kjetilho
@@ -260,23 +266,36 @@ char **argv;
 	        newargv = (char **) xalloc((argc - optind) * sizeof(char *));
 
 	for (n = optind; n < argc; ++n) {
+	        char *colon;
+
 		s = argv[n];
-		if (Dflg)
-			fprintf(stderr, "chkpath(%s)\n", s);
-		if (chkpath(s)) {
-		        if (!unique(n - optind, newargv))
-			        continue;
-			if (good++ && !eflg)
+		do {
+		    colon = strchr(s, ':');
+		    if (colon) *colon = '\0';
+
+		    if (*s == '.') {
+			if (!eflg) {
+			    if (good++)
 				putchar(sflg ? ':' : ' ');
-			if (!eflg)
-				fputs(Lflg && *s != '.' ? prefix : s, stdout);
-		} else {
+			    fputs(s, stdout);
+			}
+		    } else if (chkpath(s)) {
+		        if (unique(n - optind, newargv)) {
+			    if (good++ && !eflg)
+				putchar(sflg ? ':' : ' ');
+			    if (!eflg)
+				fputs(Lflg ? prefix : s, stdout);
+			}
+		    } else {
 		        if (uflg)
-			        newargv[n - optind] = NULL;
+			    newargv[n - optind] = NULL;
 			if (vflg)
-				fprintf(stderr, "path skipped: %s\n",
-					Lflg && *s != '.' ? prefix : s);
-		}
+			    fprintf(stderr, "path skipped: %s\n",
+				    Lflg && *s != '.' ? prefix : s);
+		    }
+		    if (! colon) break;
+		    s = colon + 1;
+		} while (1);
 	}
 
 	if (good && !eflg)
@@ -316,6 +335,9 @@ char *path;
 {
 	char pwd[MAXPATHLEN];
 	int ret;
+
+	if (Dflg)
+	    fprintf(stderr, "chkpath(%s)\n", path);
 
 #if defined(__solaris__)
     {
@@ -381,7 +403,8 @@ int maxdepth;
 	}
 
 	if (Dflg)
-		fprintf(stderr, "_chkpath(%s) prefix=%s\n", path, prefix);
+		fprintf(stderr, "_chkpath(%s, %d) prefix=%s\n",
+			path, maxdepth, prefix);
 
 	/*
 	 * Put directory terms on FIFO queue
