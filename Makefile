@@ -2,6 +2,9 @@
 # $Header$
 #
 # $Log$
+# Revision 1.6  2000/03/27 12:20:42  kjetilho
+# Hardkoda inn forståelse for /net og /ifi (Linux)
+#
 # Revision 1.5  1995/02/08 22:50:30  obh
 # solaris port.
 #
@@ -27,28 +30,30 @@
 #
 SHELL	= /bin/sh
 
+CDEBUGFLAGS=-g
+
 ### HP-UX
-#CFLAGS = -D_XPG2
+#CFLAGS = $(CDEBUGFLAGS) -D_XPG2
 #EXTRAOBJS= getwd.o
 #LIBS=
 
 ### SGI
-#CFLAGS = -O -I. -I/usr/include/sun -I/usr/include/bsd
+#CFLAGS = $(CDEBUGFLAGS) -I. -I/usr/include/sun -I/usr/include/bsd
 #EXTRAOBJS=
 #LIBS= -lsun -lbsd
 
 # OSF/1
-# CFLAGS = -std -g
+# CFLAGS = $(CDEBUGFLAGS) -std
 # EXTRAOBJS=
 # LIBS=
 
-###  Sun, Ultrix, NeXT and the rest of the lot
-CFLAGS = -g
+###  SunOS, Ultrix, NeXT and the rest of the lot
+CFLAGS = $(CDEBUGFLAGS)
 EXTRAOBJS=
 LIBS=
 
-# Solaris maskiner
-CFLAGS = -g -D__solaris__ 
+# Solaris
+CFLAGS = $(CDEBUGFLAGS)
 EXTRAOBJS=
 LIBS= -lnsl
 

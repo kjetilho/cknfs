@@ -1,3 +1,4 @@
+/* -*- mode: c; c-basic-offset: 8 -*- */
 /*
  * cknfs - Check for dead NFS servers
  *
@@ -69,6 +70,9 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
+ * Revision 1.10  2000/03/27 12:20:42  kjetilho
+ * Hardkoda inn forståelse for /net og /ifi (Linux)
+ *
  * Revision 1.9  1996/07/31 11:09:38  obh
  * La til opsjonen -H som gjør det enkelt å sjekke hvilken host som
  * eksporterer filsystemet.
@@ -153,9 +157,7 @@ static char *RCSid = "$Header$";
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
-#if defined(__solaris__)
 #include <unistd.h>
-#endif
 
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
@@ -182,7 +184,9 @@ static char *RCSid = "$Header$";
 #if !defined(sgi) && !defined(NeXT)
 extern char *realloc();
 #endif
+#ifndef __STDC__
 extern char *strchr(), *strrchr(), *strtok();
+#endif
 
 struct m_mlist {
 	int mlist_checked; /* -1 if bad, 0 if not checked, 1 if ok */
@@ -348,7 +352,7 @@ char *path;
 	if (Dflg)
 	    fprintf(stderr, "chkpath(%s)\n", path);
 
-#if defined(__solaris__)
+#if defined(linux) || (defined(sun) && defined(__SVR4))
     {
 	if (getcwd(pwd, sizeof(pwd)-1) == NULL) {
 	    perror("getcwd()");
@@ -415,6 +419,53 @@ int maxdepth;
 		fprintf(stderr, "_chkpath(%s, %d) prefix=%s\n",
 			path, maxdepth, prefix);
 
+#ifdef linux
+	/* The code for /net isn't strictly necessary since the
+	   automounter creates symlinks which we know how to handle.
+	   This might change, so the code is left for robustness. */
+
+	if (!strncmp (p, "/net/", 5)) {
+		char *host, *remotefs, *localdir;
+		host = xalloc (MAXPATHLEN);
+		remotefs = xalloc (MAXPATHLEN);
+		localdir = xalloc (MAXPATHLEN);
+		if (sscanf (p, "/net/%[^/]/%[^/]",
+			    host, remotefs) == 2) do {
+			struct m_mlist *mlist;
+
+			sprintf (localdir, "/net/%s/%s", host, remotefs);
+			if (isnfsmnt (localdir))
+				break;
+			mlist = xalloc (sizeof (struct m_mlist));
+			mlist->mlist_checked = 0;
+			mlist->mlist_dir = localdir;
+			mlist->mlist_fsname = remotefs;
+			mlist->mlist_isnfs = 1;
+			mlist->mlist_next = firstmnt;
+			firstmnt = mlist;
+		} while (0);
+	} else if (!strncmp (p, "/ifi/", 5)) {
+		char *host, *remotefs, *localdir;
+		host = xalloc (MAXPATHLEN);
+		remotefs = xalloc (MAXPATHLEN);
+		localdir = xalloc (MAXPATHLEN);
+		if (sscanf (p, "/ifi/%[^/]s/%[^/]s",
+			    host, remotefs) == 2) do {
+			struct m_mlist *mlist;
+
+			sprintf (localdir, "/ifi/%s/%s", host, remotefs);
+			if (isnfsmnt (localdir))
+				break;
+			mlist = xalloc (sizeof (struct m_mlist));
+			mlist->mlist_checked = 0;
+			mlist->mlist_dir = localdir;
+			mlist->mlist_fsname = localdir;
+			mlist->mlist_isnfs = 1;
+			mlist->mlist_next = firstmnt;
+			firstmnt = mlist;
+		} while (0);
+	}
+#endif
 	/*
 	 * Put directory terms on FIFO queue
 	 */
@@ -683,12 +734,12 @@ int size;
  * Begin machine dependent code for mount table 
  */
 
-#if defined(__solaris__)
+#if defined(sun) && defined(__SVR4)
 #include <sys/mnttab.h>
 void
 mkm_mlist()
 /*
- * Build list of mnt entries - Sun version
+ * Build list of mnt entries - Solaris version
  */
 {
     FILE *mounted;
@@ -705,7 +756,7 @@ mkm_mlist()
     do {
         i = getmntent(mounts, &mnt);
         if (i > 0) {
-	    perror(MNTTAB);
+	    fprintf (stderr, "%s: getmntent returns %d\n", MNTTAB, i);
 	    exit (1);
 	} 
         if (i == -1) break;
@@ -727,13 +778,10 @@ mkm_mlist()
 }
 #elif defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT) || defined(linux)
 #include <mntent.h>
-#if defined(linux)
-# define MNTTYPE_NFS "nfs"	/* missing in Linux header file */
-#endif
 void
 mkm_mlist()
 /*
- * Build list of mnt entries - Sun version
+ * Build list of mnt entries - SunOS/IRIX/HP-UX/NeXTSTEP/Linux version
  */
 {
 	FILE *mounted;
@@ -745,6 +793,14 @@ mkm_mlist()
 		exit(1);
 	}
 	while ((mnt = getmntent(mounted)) != NULL) {
+#ifdef linux
+		char dummy1[MAXPATHLEN];
+		int  dummy2;
+		/* skip the local automounter with funny entry */
+		if (sscanf(mnt->mnt_fsname, "%[^:]:(pid%d)",
+			   dummy1, &dummy2) == 2)
+			continue;
+#endif
 		mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
 		mlist->mlist_next = firstmnt;
 		mlist->mlist_checked = 0;
