@@ -17,6 +17,9 @@ The following options are available,
 \fB-e\fR
 Silent.  Do not print paths.
 .TP
+\fB-f\fR
+Accept any file as well as directories.
+.TP
 \fB-s\fR
 Print paths in
 .I sh

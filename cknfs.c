@@ -15,6 +15,7 @@
  * Usage: cknfs -e -s -t# -u -v -D -L paths
  *  
  *       -e     silent, do not print paths
+ *       -f	accept any type of file, not just directories
  *       -s     print paths in sh format (colons)
  *       -t n   timeout interval before assuming an NFS
  *              server is dead (default 10 seconds)
@@ -70,6 +71,9 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
+ * Revision 1.11  2000/10/25 20:26:20  kjetilho
+ * The -f flag accepts files as well as directories
+ *
  * Revision 1.10  2000/03/27 12:20:42  kjetilho
  * Hardkoda inn forståelse for /net og /ifi (Linux)
  *
@@ -149,6 +153,7 @@ static char *RCSid = "$Header$";
 #include <signal.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -198,11 +203,11 @@ struct m_mlist {
 static struct m_mlist *firstmnt;
 
 static int errflg;
-static int eflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
+static int eflg, fflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
 static int timeout = DEFAULT_TIMEOUT;
 static char prefix[MAXPATHLEN];
 struct m_mlist *isnfsmnt();
-char *xalloc();
+void *xalloc();
 void mkm_mlist();
 int unique();
 
@@ -226,9 +231,12 @@ char **argv;
 	setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf));
 	setvbuf(stderr, errbuf, _IOLBF, sizeof(errbuf));
 
-	while ((n = getopt(argc, argv, "est:uvDHL")) != EOF)
+	while ((n = getopt(argc, argv, "efst:uvDHL")) != EOF)
 		switch(n) {
 			case 'e':	++eflg;
+					break;
+
+			case 'f':	++fflg;
 					break;
 
 			case 's':	++sflg;
@@ -420,6 +428,11 @@ int maxdepth;
 			path, maxdepth, prefix);
 
 #ifdef linux
+	/* We can easily hang if we trigger the automounter and the
+	   remote server is down.  This code avoids the situation for
+	   our most important directories.  If it is outside /ifi and
+	   /net, it is probably the user's home directory ... */
+
 	/* The code for /net isn't strictly necessary since the
 	   automounter creates symlinks which we know how to handle.
 	   This might change, so the code is left for robustness. */
@@ -514,6 +527,8 @@ int maxdepth;
 		if ((stb.st_mode & S_IFMT) != S_IFLNK) {
 			/* not symlink */
 			if (chdir(s) < 0) {
+				if (fflg)
+					return 1;
 				perror(prefix);
 				goto fail;
 			}
@@ -711,7 +726,7 @@ register struct m_mlist *mlist;
 }
 
 
-char *
+void *
 xalloc(size)
 /*
  * Alloc memory with error checks
