@@ -21,6 +21,7 @@
  *       -v     verbose
  *       -D     debug
  *       -L     expand symbolic links
+ *	 -H	print hostname pinged.
  *
  * Typical examples:
  *
@@ -68,7 +69,11 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.8  1995/04/04 23:05:42  kjetilho
+ * Revision 1.9  1996/07/31 11:09:38  obh
+ * La til opsjonen -H som gjør det enkelt å sjekke hvilken host som
+ * eksporterer filsystemet.
+ *
+ * Revision 1.8  1995/04/04  23:05:42  kjetilho
  * Fiksa slik at directory-namn med kolon i vert automagisk splitta opp.
  * Fiksa også bug med at "." vart fjerna om cwd låg før i PATH og
  * -u-opsjonen var i effekt. Ei bieffekt er at multiple "." i PATH får vere
@@ -189,7 +194,7 @@ struct m_mlist {
 static struct m_mlist *firstmnt;
 
 static int errflg;
-static int eflg, sflg, vflg, Dflg, Lflg, uflg;
+static int eflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
 static int timeout = DEFAULT_TIMEOUT;
 static char prefix[MAXPATHLEN];
 struct m_mlist *isnfsmnt();
@@ -217,7 +222,7 @@ char **argv;
 	setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf));
 	setvbuf(stderr, errbuf, _IOLBF, sizeof(errbuf));
 
-	while ((n = getopt(argc, argv, "est:uvDL")) != EOF)
+	while ((n = getopt(argc, argv, "est:uvDHL")) != EOF)
 		switch(n) {
 			case 'e':	++eflg;
 					break;
@@ -235,6 +240,9 @@ char **argv;
 					break;
 
 			case 'D':	++Dflg; ++vflg;
+					break;
+
+			case 'H':	++Hflg;
 					break;
 
 			case 'L':	++Lflg;
@@ -258,6 +266,7 @@ char **argv;
 		fprintf(stderr, "\t -u\tunique paths\n");
 		fprintf(stderr, "\t -v\tverbose\n");
 		fprintf(stderr, "\t -D\tdebug\n");
+		fprintf(stderr, "\t -H\tprint host pinged\n");
 		fprintf(stderr, "\t -L\texpand symbolic links\n\n");
 		exit(1);
 	}
@@ -569,6 +578,9 @@ register struct m_mlist *mlist;
 	if ((s = strchr(p, ':')) != NULL)
 		*s = '\0';
 	len = strlen(p);
+
+	if (Hflg)
+		printf("%s ", p);
 
 	/*
 	 * See if remote host already checked via another mount point
