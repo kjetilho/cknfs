@@ -67,7 +67,11 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.1.1.1  1990/09/09 20:01:19  rein
+ * Revision 1.2  1992/10/24 03:01:02  obh
+ * Fikset litt p} cknfs slik at den kompilerer greit p} SGI og HP.
+ * Klarte ikke } logge meg inn p} NeXT maskinen.
+ *
+ * Revision 1.1.1.1  1990/09/09  20:01:19  rein
  * Version 1.6 of cknfs (check nfs server)
  *
  * Revision 1.1  90/09/09  20:01:16  rein
@@ -127,7 +131,9 @@ static char *RCSid = "$Header$";
 
 #define DEFAULT_TIMEOUT 10  /* Default timeout for checking NFS server */
 
+#ifndef sgi
 extern char *realloc();
+#endif
 extern char *strchr(), *strrchr(), *strtok();
 
 struct m_mlist {
@@ -542,7 +548,7 @@ int size;
  * Begin machine dependent code for mount table 
  */
 
-#if defined(sun) || defined(sgi)
+#if defined(sun) || defined(sgi) || defined(__hpux)
 #include <mntent.h>
 void
 mkm_mlist()

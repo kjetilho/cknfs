@@ -2,7 +2,11 @@
 # $Header$
 #
 # $Log$
-# Revision 1.1.1.1  1990/09/09 20:01:10  rein
+# Revision 1.2  1992/10/24 03:01:00  obh
+# Fikset litt p} cknfs slik at den kompilerer greit p} SGI og HP.
+# Klarte ikke } logge meg inn p} NeXT maskinen.
+#
+# Revision 1.1.1.1  1990/09/09  20:01:10  rein
 # Version 1.6 of cknfs (check nfs server)
 #
 # Revision 1.1  90/09/09  20:01:09  rein
@@ -14,16 +18,20 @@
 #
 SHELL	= /bin/sh
 
-###  Change to -g for debugging
-CFLAGS	= -O
+### HP-UX
+CFLAGS = -D_XPG2
+EXTRAOBJS= getwd.o
+LIBS=
 
-### Necessary include dirs, if any
-INCLUDES =
-#INCLUDES = -I/usr/include/sun -I/usr/include/bsd     # for SGI systems
+### SGI
+#CFLAGS = -O -I. -I/usr/include/sun -I/usr/include/bsd
+#EXTRAOBJS=
+#LIBS= -lsun -lbsd
 
-### Necessary libraries, if any
-LFLAGS=
-#LFLAGS= -lsun -lbsd   # for SGI systems
+###  Sun and the rest of the lot
+#CFLAGS = -O
+#EXTRAOBJS=
+#LIBS=
 
 ###  Where executable should be put
 DESTDIR	= /local/bin
@@ -46,8 +54,8 @@ PROG = cknfs
 
 all:	$(PROG)
 
-cknfs:	cknfs.c
-	$(CC) $(CFLAGS) $(INCLUDES) cknfs.c -o cknfs $(LFLAGS)
+cknfs:	cknfs.o $(EXTRAOBJS)
+	$(CC) -o cknfs cknfs.o $(EXTRAOBJS) $(LIBS)
 
 install:	$(PROG)
 	rm -f $(DESTDIR)/$(PROG)
@@ -58,7 +66,7 @@ install:	$(PROG)
 	chmod 644 $(MANDIR)/$(MANPAGE)
 
 clean:
-	rm -f *.o core
+	rm -f *.o core cknfs
 
 clobber:
 	rm -f *.o core $(PROG)
