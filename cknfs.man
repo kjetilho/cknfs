@@ -23,7 +23,8 @@ Accept any file as well as directories.
 \fB-s\fR
 Print paths in
 .I sh
-format, with colons as separators.
+format, with colons as separators.  This will also allow each path
+argument to consist of multiple paths separated by colons.
 .TP
 \fB-u\fR
 Unique paths.  Keep only the first pathname when several paths reference

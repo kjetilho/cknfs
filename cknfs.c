@@ -71,6 +71,9 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
+ * Revision 1.13  2000/10/25 22:19:42  kjetilho
+ * -u didn't work when combined with -s
+ *
  * Revision 1.12  2000/10/25 20:35:26  kjetilho
  * Forgot to update the usage message.
  *
@@ -156,6 +159,7 @@ static char *RCSid = "$Header$";
 #include <signal.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -189,10 +193,8 @@ static char *RCSid = "$Header$";
 
 #define DEFAULT_TIMEOUT 10  /* Default timeout for checking NFS server */
 
-#if !defined(sgi) && !defined(NeXT)
-extern char *realloc();
-#endif
 #ifndef __STDC__
+extern char *realloc(), *malloc();
 extern char *strchr(), *strrchr(), *strtok();
 #endif
 
@@ -211,6 +213,7 @@ static int timeout = DEFAULT_TIMEOUT;
 static char prefix[MAXPATHLEN];
 struct m_mlist *isnfsmnt();
 void *xalloc();
+void *xrealloc();
 void mkm_mlist();
 int unique();
 
@@ -292,35 +295,38 @@ char **argv;
 	        newargv = (char **) xalloc((argc - optind) * sizeof(char *));
 
 	for (n = optind; n < argc; ++n) {
-	        char *colon;
+	        char *colon = NULL;
 
 		s = argv[n];
 		do {
-		    colon = strchr(s, ':');
-		    if (colon) *colon = '\0';
+			if (sflg) {
+				colon = strchr(s, ':');
+				if (colon) *colon = '\0';
+			}
 
-		    if (*s == '.') {
-			if (!eflg) {
-			    if (good++)
-				putchar(sflg ? ':' : ' ');
-			    fputs(s, stdout);
+			if (*s == '.') {
+				if (!eflg) {
+					if (good++)
+						putchar(sflg ? ':' : ' ');
+					fputs(s, stdout);
+				}
+			} else if (chkpath(s)) {
+				if (unique(prefix)) {
+					if (good++ && !eflg)
+						putchar(sflg ? ':' : ' ');
+					if (!eflg)
+						fputs(Lflg ? prefix : s, stdout);
+				}
+			} else {
+				if (uflg)
+					newargv[n - optind] = NULL;
+				if (vflg)
+					fprintf(stderr, "path skipped: %s\n",
+						Lflg && *s != '.' ? prefix : s);
 			}
-		    } else if (chkpath(s)) {
-		        if (unique(n - optind, newargv)) {
-			    if (good++ && !eflg)
-				putchar(sflg ? ':' : ' ');
-			    if (!eflg)
-				fputs(Lflg ? prefix : s, stdout);
-			}
-		    } else {
-		        if (uflg)
-			    newargv[n - optind] = NULL;
-			if (vflg)
-			    fprintf(stderr, "path skipped: %s\n",
-				    Lflg && *s != '.' ? prefix : s);
-		    }
-		    if (! colon) break;
-		    s = colon + 1;
+			if (! colon)
+				break;	/* always taken if !sflg */
+			s = colon + 1;
 		} while (1);
 	}
 
@@ -334,21 +340,28 @@ char **argv;
 }
 
 int
-unique(n, newargv)
-int n;
-char **newargv;
+unique(path)
+char *path;
 {
+	static int n = -1;
+	static int hist_size = 0;
+	static char **hist = NULL;
         int i;
 
 	if (!uflg)
 	        return 1;
 
-	newargv[n] = xalloc(strlen(prefix) + 1);
-	strcpy(newargv[n], prefix);
+	if (++n >= hist_size) {
+		hist_size += 32;
+		hist = xrealloc(hist, hist_size * sizeof (char *));
+	}
+	hist[n] = xalloc(strlen(path) + 1);
+	strcpy(hist[n], path);
 	for (i = 0; i < n; i++)
-	        if (newargv[i])
-		        if (strcmp(newargv[i], newargv[n]) == 0)
-			        return 0;
+	        if (hist[i] && strcmp(hist[i], hist[n]) == 0) {
+			--n;
+			return 0;
+		}
 	return 1;
 }
 
@@ -411,7 +424,6 @@ int maxdepth;
 	char p[MAXPATHLEN];
 	char symlink[MAXPATHLEN];
 	char *queue[NTERMS];
-	static int depth = 0;
 
 	if (maxdepth == 0) {
 		fprintf(stderr,
@@ -526,7 +538,7 @@ int maxdepth;
 
 		/* Check if symlink */
 		if (lstat(s, &stb) < 0) {
-			perror(s);
+			perror(prefix);
 			goto fail;
 		}
 		if ((stb.st_mode & S_IFMT) != S_IFLNK) {
@@ -739,11 +751,28 @@ xalloc(size)
 int size;
 {
 	register char *mem;
-#ifndef __STDC__
-	char *malloc();
-#endif
 	
 	if ((mem = (char *)malloc((unsigned)size)) == NULL) {
+		(void) fprintf(stderr, "out of memory\n");
+		exit(1);
+	}
+	return(mem);
+}
+
+void *
+xrealloc(orig, size)
+/*
+ * Realloc memory with error checks
+ */
+void *orig;
+int size;
+{
+	register char *mem;
+
+	if (orig == NULL)
+		return(xalloc(size));
+
+	if ((mem = (char *)realloc(orig, (unsigned)size)) == NULL) {
 		(void) fprintf(stderr, "out of memory\n");
 		exit(1);
 	}
