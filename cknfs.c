@@ -68,7 +68,10 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.6  1993/12/10 00:39:09  kjetilho
+ * Revision 1.7  1995/02/08 22:50:31  obh
+ * solaris port.
+ *
+ * Revision 1.6  1993/12/10  00:39:09  kjetilho
  * Kompilerer p} Linux
  *
  * Revision 1.5  1993/09/28  23:09:36  karlo
@@ -135,9 +138,14 @@ static char *RCSid = "$Header$";
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#define PORTMAP
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
+#if defined(__solaris__)
+#include <unistd.h>
+#endif
+
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
 # define NFS_PROGRAM 100003L
@@ -306,14 +314,25 @@ chkpath(path)
  */
 char *path;
 {
-	extern char *getwd();
 	char pwd[MAXPATHLEN];
 	int ret;
 
+#if defined(__solaris__)
+    {
+	if (getcwd(pwd, sizeof(pwd)-1) == NULL) {
+	    perror("getcwd()");
+	    return 0;
+	}
+    }
+#else
+    {
+	extern char *getwd();
 	if (getwd(pwd) == NULL) {
 		fprintf(stderr, "%s\n", pwd);
 		return 0;
 	}
+    }
+#endif
 	if (*path != '/')   /* If not absolute path, get initial prefix */
 		strcpy(prefix, pwd);
 
@@ -566,8 +585,7 @@ register struct m_mlist *mlist;
 	pmap.pm_port = 0;
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
-	if ((rpc_stat = clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, &pmap,
-			xdr_u_short, &port, tottimeout)) != RPC_SUCCESS) {
+	if ((rpc_stat = clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap, xdr_u_short, (caddr_t)&port, tottimeout)) != RPC_SUCCESS) {
 		clnt_perror(client, p);
 		clnt_destroy(client);
 		return 0;
@@ -630,7 +648,49 @@ int size;
  * Begin machine dependent code for mount table 
  */
 
-#if defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT) || defined(linux)
+#if defined(__solaris__)
+#include <sys/mnttab.h>
+void
+mkm_mlist()
+/*
+ * Build list of mnt entries - Sun version
+ */
+{
+    FILE *mounted;
+    struct m_mlist *mlist;
+    struct mnttab mnt;
+    FILE *mounts = fopen(MNTTAB, "r");
+    int i;
+
+    if (mounts == NULL) {
+	perror(MNTTAB);
+	exit (1);
+    }
+
+    do {
+        i = getmntent(mounts, &mnt);
+        if (i > 0) {
+	    perror(MNTTAB);
+	    exit (1);
+	} 
+        if (i == -1) break;
+	mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
+	mlist->mlist_next = firstmnt;
+	mlist->mlist_checked = 0;
+	mlist->mlist_dir = xalloc(strlen(mnt.mnt_mountp)+1);
+	(void) strcpy(mlist->mlist_dir, mnt.mnt_mountp);
+	mlist->mlist_fsname = xalloc(strlen(mnt.mnt_special)+1);
+	(void) strcpy(mlist->mlist_fsname, mnt.mnt_special);
+	if (strcmp(mnt.mnt_fstype, "nfs") == 0) {
+	    mlist->mlist_isnfs = 1;
+	} else {
+	    mlist->mlist_isnfs = 0;
+	}
+	firstmnt = mlist;
+    } while (1);
+    (void) fclose(mounts);
+}
+#elif defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT) || defined(linux)
 #include <mntent.h>
 #if defined(linux)
 # define MNTTYPE_NFS "nfs"	/* missing in Linux header file */

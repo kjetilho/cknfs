@@ -2,7 +2,10 @@
 # $Header$
 #
 # $Log$
-# Revision 1.4  1993/02/25 17:40:58  anders
+# Revision 1.5  1995/02/08 22:50:30  obh
+# solaris port.
+#
+# Revision 1.4  1993/02/25  17:40:58  anders
 # OSF/1 port
 #
 # Revision 1.3  1992/10/29  14:56:42  obh
@@ -35,14 +38,19 @@ SHELL	= /bin/sh
 #LIBS= -lsun -lbsd
 
 # OSF/1
-CFLAGS = -std -g
+# CFLAGS = -std -g
+# EXTRAOBJS=
+# LIBS=
+
+###  Sun, Ultrix, NeXT and the rest of the lot
+CFLAGS = -g
 EXTRAOBJS=
 LIBS=
 
-###  Sun, Ultrix, NeXT and the rest of the lot
-#CFLAGS = -g
-#EXTRAOBJS=
-#LIBS=
+# Solaris maskiner
+CFLAGS = -g -D__solaris__ 
+EXTRAOBJS=
+LIBS= -lnsl
 
 ###  Where executable should be put
 DESTDIR	= /local/bin
