@@ -67,9 +67,12 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.1  1990/09/09 20:01:16  rein
- * Initial revision
+ * Revision 1.1.1.1  1990/09/09 20:01:19  rein
+ * Version 1.6 of cknfs (check nfs server)
  *
+ * Revision 1.1  90/09/09  20:01:16  rein
+ * Initial revision
+ * 
  * Revision 1.6  89/06/21  00:04:15  aklietz
  * Linted.  Baseline for release.
  * 

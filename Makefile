@@ -2,9 +2,12 @@
 # $Header$
 #
 # $Log$
-# Revision 1.1  1990/09/09 20:01:09  rein
-# Initial revision
+# Revision 1.1.1.1  1990/09/09 20:01:10  rein
+# Version 1.6 of cknfs (check nfs server)
 #
+# Revision 1.1  90/09/09  20:01:09  rein
+# Initial revision
+# 
 # Revision 1.1  89/06/20  23:29:37  aklietz
 # Initial revision
 # 

@@ -1,0 +1,19 @@
+This program checks for dead NFS servers.
+
+I wrote it because I was tired of logging into a NFS client workstation,
+only to find myself hung because one of my twenty-odd execution paths
+pointed to some obscure NFS server that happened to be dead.
+
+Well, this program fixes that problem.  It takes a list of execution
+paths as arguments.   Each path is examined for an NFS mount point.
+If found, the corresponding NFS server is checked.   Paths that lead
+to dead NFS servers are ignored.  The remaining paths are printed to
+stdout.  No more hung logins!
+
+Typical examples:
+
+	set path = `cknfs /bin /usr/bin /usr/ucb . /usr6/bin /sdg/bin`
+	alias cd 'cknfs -e \!*; if ($status == 0) chdir \!*'
+
+The latter example prevents you from hanging if you cd to a
+directory that leads to a dead NFS server.

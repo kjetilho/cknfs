@@ -1,0 +1,69 @@
+.TH CKNFS 1L 06/10/89 NCSA
+.SH NAME
+cknfs \- check for dead NFS servers
+.SH SYNOPSIS
+.B cknfs
+[ \fB-esvDL\fR ] [ \fB-t \fItimeout\fR ] [path...]
+.SH DESCRIPTION
+.I Cknfs
+takes a list of execution paths.  Each path is examined
+for an NFS mount point.  If found, the corresponding NFS server
+is checked.  Paths that lead to dead NFS servers are ignored.
+The remaining paths are printed to stdout.
+.SS Options
+.PP
+The following options are available,
+.TP
+\fB-e\fR
+Silent.  Do not print paths.
+.TP
+\fB-s\fR
+Print paths in
+.I sh
+format, with colons as separators.
+.TP
+\fB-t \fItimeout\fR
+Specify the timeout interval before assuming an NFS server is dead.
+The default is 10 seconds.
+.TP
+\fB-v\fR
+Verbose.  A status message is printed for each NFS server.
+.TP
+\fB-D\fR
+Debug.  Messages are printed as the paths are parsed.
+.TP
+\fB-L\fR
+Expand symbolic links on output.  This increases the efficiency of shell path
+searches on machines without a kernel directory name cache.
+.sp
+.SH EXAMPLES
+.sp
+.RS
+set path = `/usr/lbin/cknfs /bin /usr/bin /usr/ucb . /usr6/bin /sdg/bin`
+.RE
+.sp
+.RS
+alias cd 'cknfs \-e \e!*; if ($status == 0) chdir \e!*'
+.RE
+.sp
+The latter example checks the path before performing a
+.I chdir
+operation.
+.SH "SEE ALSO"
+nfs(4)
+.SH AUTHOR
+.nf
+Alan Klietz
+National Center for Supercomputing Applications
+.fi
+.SH BUGS
+In some instances, a
+path that
+.I cknfs
+assumes valid could be vulnerable to hanging if a 3rd party machine
+fails.  This happens if your administrator mixes NFS mount points
+and/or regular directories with NFS directories from
+3rd party machines.  The best organization is an overall
+.I /nfs
+directory with local subdirectories for each server machine and with
+mount points located therein.
