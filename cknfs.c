@@ -68,7 +68,10 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
- * Revision 1.5  1993/09/28 23:09:36  karlo
+ * Revision 1.6  1993/12/10 00:39:09  kjetilho
+ * Kompilerer p} Linux
+ *
+ * Revision 1.5  1993/09/28  23:09:36  karlo
  * "-u" opsjon lagt inn - skriv kun ut unike katalognamn. Symbolske linkar
  * vert ekspanderte.
  * Bug-fiksing:
@@ -121,29 +124,33 @@ static char *RCSid = "$Header$";
  * 
  */
 
-#include "sys/param.h"
-#include "errno.h"
-#include "sys/types.h"
-#include "sys/stat.h"
-#include "signal.h"
-#include "ctype.h"
-#include "stdio.h"
-#include "sys/time.h"
-#include "sys/socket.h"
-#include "arpa/inet.h"
-#include "netdb.h"
-#include "rpc/rpc.h"
-#include "rpc/pmap_prot.h"
-#include "rpc/pmap_clnt.h"
-#ifndef sgi /* sgi is missing nfs.h for some reason */
-#ifdef __osf__
-#include <sys/mount.h>
-#endif
-#include "nfs/nfs.h"
+#include <sys/param.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <signal.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <rpc/rpc.h>
+#include <rpc/pmap_prot.h>
+#include <rpc/pmap_clnt.h>
+#if defined(sgi)
+  /* sgi is missing nfs.h, so we must hardcode the RPC values */
+# define NFS_PROGRAM 100003L
+# define NFS_VERSION 2L
 #else
-	/* sgi is missing nfs.h, so we must hardcode the RPC values */
-#	define NFS_PROGRAM 100003L
-#	define NFS_VERSION 2L
+# ifdef __osf__
+#  include <sys/mount.h>
+# endif
+# if defined(linux)
+#  include <linux/nfs.h>
+# else
+#  include <nfs/nfs.h>
+# endif
 #endif
 
 /*
@@ -623,8 +630,11 @@ int size;
  * Begin machine dependent code for mount table 
  */
 
-#if defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT)
+#if defined(sun) || defined(sgi) || defined(__hpux) || defined(NeXT) || defined(linux)
 #include <mntent.h>
+#if defined(linux)
+# define MNTTYPE_NFS "nfs"	/* missing in Linux header file */
+#endif
 void
 mkm_mlist()
 /*
