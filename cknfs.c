@@ -71,6 +71,9 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
+ * Revision 1.12  2000/10/25 20:35:26  kjetilho
+ * Forgot to update the usage message.
+ *
  * Revision 1.11  2000/10/25 20:26:20  kjetilho
  * The -f flag accepts files as well as directories
  *
@@ -268,10 +271,12 @@ char **argv;
 		++errflg;
 
 	if (errflg) {
-		fprintf(stderr, "Usage: %s -e -s -t# -u -v -D -L paths\n", argv[0]);
+		fprintf(stderr, "Usage: %s -e -f -s -t# -u -v -D -L paths\n",
+			argv[0]);
 		fprintf(stderr, "\tCheck paths for dead NFS servers\n");
 		fprintf(stderr, "\tGood paths are printed to stdout\n\n");
 		fprintf(stderr, "\t -e\tsilent, do not print paths\n");
+		fprintf(stderr, "\t -f\taccept ordinary files\n");
 		fprintf(stderr, "\t -s\tprint paths in sh format (semicolons)\n");
 		fprintf(stderr, "\t -t n\ttimeout interval before assuming an NFS\n");
 		fprintf(stderr, "\t\tserver is dead (default 10 seconds)\n");
