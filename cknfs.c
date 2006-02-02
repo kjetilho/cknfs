@@ -65,95 +65,11 @@
  * No warranty is expressed or implied.
  * Unlimited redistribution permitted.
  *
+ * Additional modifications made 1990-2006, University of Oslo
  */
 
 static char *RCSid = "$Header$";
 
-/*
- * $Log$
- * Revision 1.14  2006/02/02 08:11:43  kjetilho
- * reworked checking of automounter on Linux
- *
- * Revision 1.13  2000/10/25 22:19:42  kjetilho
- * -u didn't work when combined with -s
- *
- * Revision 1.12  2000/10/25 20:35:26  kjetilho
- * Forgot to update the usage message.
- *
- * Revision 1.11  2000/10/25 20:26:20  kjetilho
- * The -f flag accepts files as well as directories
- *
- * Revision 1.10  2000/03/27 12:20:42  kjetilho
- * Hardkoda inn forståelse for /net og /ifi (Linux)
- *
- * Revision 1.9  1996/07/31 11:09:38  obh
- * La til opsjonen -H som gjør det enkelt å sjekke hvilken host som
- * eksporterer filsystemet.
- *
- * Revision 1.8  1995/04/04  23:05:42  kjetilho
- * Fiksa slik at directory-namn med kolon i vert automagisk splitta opp.
- * Fiksa også bug med at "." vart fjerna om cwd låg før i PATH og
- * -u-opsjonen var i effekt. Ei bieffekt er at multiple "." i PATH får vere
- * i fred. So what.
- *
- * Revision 1.7  1995/02/08  22:50:31  obh
- * solaris port.
- *
- * Revision 1.6  1993/12/10  00:39:09  kjetilho
- * Kompilerer p} Linux
- *
- * Revision 1.5  1993/09/28  23:09:36  karlo
- * "-u" opsjon lagt inn - skriv kun ut unike katalognamn. Symbolske linkar
- * vert ekspanderte.
- * Bug-fiksing:
- *  - Kun "/" vart til "" (dvs. i praksis ".")
- *  - symbolske linkar som peikte p} kvarandre fekk cknfs til } g} i evig l|kke.
- *    No kan ein maks ha 64 niv} med symbolske linkar f|r den g}r vidare.
- *  - relative katalognamn var relative i h|ve den f|rre katalogen i lista.
- *  - "-L" ekspanderte "." No f}r katalognamn som byrjar med "." f} vere i
- *    fred. Katalognamn som korkje byrjar med "." eller "/" er relative og
- *    vert ekspanderte.
- *
- * Revision 1.4  1993/02/25  17:41:00  anders
- * OSF/1 port
- *
- * Revision 1.3  1992/10/29  14:56:45  obh
- * portet cknfs til NeXT.
- *
- * Revision 1.2  1992/10/24  03:01:02  obh
- * Fikset litt p} cknfs slik at den kompilerer greit p} SGI og HP.
- * Klarte ikke } logge meg inn p} NeXT maskinen.
- *
- * Revision 1.1.1.1  1990/09/09  20:01:19  rein
- * Version 1.6 of cknfs (check nfs server)
- *
- * Revision 1.1  90/09/09  20:01:16  rein
- * Initial revision
- * 
- * Revision 1.6  89/06/21  00:04:15  aklietz
- * Linted.  Baseline for release.
- * 
- * Revision 1.5  89/06/20  23:37:59  aklietz
- * Restart the parse loop on .. instead of just popping the stack,
- * because a/../b need not necessarily == b across a symbolic link.
- * Add support for SGI.
- * 
- * Revision 1.4  89/05/31  18:24:49  aklietz
- * Fix bug introduced in rev 1.3 that did hangable lstat before
- * checking for NFS mount point.
- * Add support for Ultrix.
- * 
- * Revision 1.3  89/05/29  03:30:55  aklietz
- * Terminate silently if no args in -e mode.
- * Fix omission of chdir("/") during parse of symlink to absolute path.
- * 
- * Revision 1.2  89/05/26  14:14:35  aklietz
- * Baseline for release
- * 
- * Revision 1.1  89/05/26  13:37:39  aklietz
- * Initial revision
- * 
- */
 
 #include <sys/param.h>
 #include <errno.h>
@@ -246,33 +162,23 @@ char **argv;
 		switch(n) {
 			case 'e':	++eflg;
 					break;
-
 			case 'f':	++fflg;
 					break;
-
 			case 's':	++sflg;
 					break;
-
 			case 't':	timeout = atoi(optarg);
 					break;
-
 			case 'u':	++uflg;
 					break;
-
 			case 'v':	++vflg;
 					break;
-
 			case 'D':	++Dflg; ++vflg;
 					break;
-
 			case 'H':	++Hflg;
 					break;
-
 			case 'L':	++Lflg;
 					break;
-
-			default:
-					++errflg;
+			default:	++errflg;
 		}
 
 	if (argc <= optind && !eflg) /* no paths */
