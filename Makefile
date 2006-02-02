@@ -2,6 +2,9 @@
 # $Header$
 #
 # $Log$
+# Revision 1.7  2006/02/02 09:35:50  kjetilho
+# make it easier to install into a different prefix
+#
 # Revision 1.6  2000/03/27 12:20:42  kjetilho
 # Hardkoda inn forståelse for /net og /ifi (Linux)
 #
@@ -57,11 +60,12 @@ CFLAGS = $(CDEBUGFLAGS)
 EXTRAOBJS=
 LIBS= -lnsl
 
+PREFIX = /usr/local
 ###  Where executable should be put
-DESTDIR	= /local/bin
+DESTDIR	= $(PREFIX)/bin
 
 ###  Where man page should be put
-MANDIR	= /local/man/man1
+MANDIR	= $(PREFIX)/share/man/man1
 
 ###  Suffix for man page
 #MANSUFFIX = 1l
