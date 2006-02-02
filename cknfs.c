@@ -71,6 +71,9 @@ static char *RCSid = "$Header$";
 
 /*
  * $Log$
+ * Revision 1.14  2006/02/02 08:11:43  kjetilho
+ * reworked checking of automounter on Linux
+ *
  * Revision 1.13  2000/10/25 22:19:42  kjetilho
  * -u didn't work when combined with -s
  *
@@ -170,6 +173,7 @@ static char *RCSid = "$Header$";
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
@@ -180,10 +184,10 @@ static char *RCSid = "$Header$";
 #  include <sys/mount.h>
 # endif
 # if defined(linux)
-#  include <linux/nfs.h>
-# else
-#  include <nfs/nfs.h>
+   /* not available in user headers? */
+#  define NFS_VERSION 2L
 # endif
+# include <nfs/nfs.h>
 #endif
 
 /*
@@ -204,6 +208,7 @@ struct m_mlist {
 	char *mlist_dir;
 	char *mlist_fsname;
 	int mlist_isnfs;
+	int mlist_pid;	/* if pid is set, only check automount process */
 };
 static struct m_mlist *firstmnt;
 
@@ -443,59 +448,6 @@ int maxdepth;
 	if (Dflg)
 		fprintf(stderr, "_chkpath(%s, %d) prefix=%s\n",
 			path, maxdepth, prefix);
-
-#ifdef linux
-	/* We can easily hang if we trigger the automounter and the
-	   remote server is down.  This code avoids the situation for
-	   our most important directories.  If it is outside /ifi and
-	   /net, it is probably the user's home directory ... */
-
-	/* The code for /net isn't strictly necessary since the
-	   automounter creates symlinks which we know how to handle.
-	   This might change, so the code is left for robustness. */
-
-	if (!strncmp (p, "/net/", 5)) {
-		char *host, *remotefs, *localdir;
-		host = xalloc (MAXPATHLEN);
-		remotefs = xalloc (MAXPATHLEN);
-		localdir = xalloc (MAXPATHLEN);
-		if (sscanf (p, "/net/%[^/]/%[^/]",
-			    host, remotefs) == 2) do {
-			struct m_mlist *mlist;
-
-			sprintf (localdir, "/net/%s/%s", host, remotefs);
-			if (isnfsmnt (localdir))
-				break;
-			mlist = xalloc (sizeof (struct m_mlist));
-			mlist->mlist_checked = 0;
-			mlist->mlist_dir = localdir;
-			mlist->mlist_fsname = remotefs;
-			mlist->mlist_isnfs = 1;
-			mlist->mlist_next = firstmnt;
-			firstmnt = mlist;
-		} while (0);
-	} else if (!strncmp (p, "/ifi/", 5)) {
-		char *host, *remotefs, *localdir;
-		host = xalloc (MAXPATHLEN);
-		remotefs = xalloc (MAXPATHLEN);
-		localdir = xalloc (MAXPATHLEN);
-		if (sscanf (p, "/ifi/%[^/]s/%[^/]s",
-			    host, remotefs) == 2) do {
-			struct m_mlist *mlist;
-
-			sprintf (localdir, "/ifi/%s/%s", host, remotefs);
-			if (isnfsmnt (localdir))
-				break;
-			mlist = xalloc (sizeof (struct m_mlist));
-			mlist->mlist_checked = 0;
-			mlist->mlist_dir = localdir;
-			mlist->mlist_fsname = localdir;
-			mlist->mlist_isnfs = 1;
-			mlist->mlist_next = firstmnt;
-			firstmnt = mlist;
-		} while (0);
-	}
-#endif
 	/*
 	 * Put directory terms on FIFO queue
 	 */
@@ -629,6 +581,57 @@ char *host;
 }
 
 
+static int
+check_automount(mlist)
+/*
+ * Probe the automounter process and see if it's alive
+ */
+struct m_mlist *mlist;
+{
+#ifdef linux
+	char procfile[32];
+	char statline[512];
+	char *line = statline;
+	int statfd;
+	int field = 2;
+
+	if (Dflg)
+		fprintf(stderr, "check_automount %d\n", mlist->mlist_pid);
+	sprintf(procfile, "/proc/%d/stat", mlist->mlist_pid);
+	statfd = open(procfile, O_RDONLY);
+	if (statfd < 0) {
+		if (vflg)
+			fprintf(stderr, "Process %d is dead\n",
+				mlist->mlist_pid);
+		mlist->mlist_checked = -1;
+		return -1;
+	}
+	read(statfd, statline, sizeof(statline)-1);
+	statline[sizeof(statline)-1] = 0;
+	while (*line && field > 0) {
+		if (*line++ == ' ')
+			--field;
+	}
+	if (Dflg)
+		fprintf(stderr, "process state %c\n", *line);
+	/* D is disk wait.  T is stopped.  others? */
+	if (*line == 'D' || *line == 'T')
+		mlist->mlist_checked = -1;
+	else
+		mlist->mlist_checked = 1;
+	close(statfd);
+#else
+	/* mlist_pid can't be populated other than on Linux, but we
+	   add code for future portability anyway. */
+	if (kill(0, mlist->mlist_pid) < 0 && errno == ESRCH)
+		mlist->mlist_checked = -1;
+	else
+		mlist->mlist_checked = 1;
+#endif
+	return mlist->mlist_checked;
+}
+
+
 int
 chknfsmnt(mlist)
 /*
@@ -653,6 +656,9 @@ register struct m_mlist *mlist;
 
 	if (mlist->mlist_checked) /* if already checked this mount point */
 		return (mlist->mlist_checked);
+
+	if (mlist->mlist_pid)
+		return check_automount(mlist);
 
 	/*
 	 * Save path to working storage and strip colon
@@ -703,6 +709,8 @@ register struct m_mlist *mlist;
 	pmap.pm_port = 0;
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
+	/* warning about mismatched type for xdr_pmap and xdr_u_short
+	   is a Linux header bug */
 	if ((rpc_stat = clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap, xdr_u_short, (caddr_t)&port, tottimeout)) != RPC_SUCCESS) {
 		clnt_perror(client, p);
 		clnt_destroy(client);
@@ -729,6 +737,7 @@ register struct m_mlist *mlist;
 	 */
 	tottimeout.tv_sec = timeout;
 	tottimeout.tv_usec = 0;
+	/* warning about mismatched type for xdr_void is a Linux header bug */
 	if ((rpc_stat = clnt_call(client, NULLPROC, xdr_void, (char *)NULL,
 			xdr_void, (char *)NULL, tottimeout)) != RPC_SUCCESS) {
 		clnt_perror(client, p);
@@ -842,22 +851,26 @@ mkm_mlist()
 		exit(1);
 	}
 	while ((mnt = getmntent(mounted)) != NULL) {
-#ifdef linux
 		char dummy1[MAXPATHLEN];
-		int  dummy2;
-		/* skip the local automounter with funny entry */
-		if (sscanf(mnt->mnt_fsname, "%[^:]:(pid%d)",
-			   dummy1, &dummy2) == 2)
-			continue;
-#endif
+		int  pid;
+
 		mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
+		mlist->mlist_pid = 0;
+#ifdef linux
+		/* remember the local automounter with funny entry */
+		if (sscanf(mnt->mnt_fsname, "%[^(](pid%d)",
+			   dummy1, &pid) == 2) {
+			mlist->mlist_pid = pid;
+		}
+#endif
 		mlist->mlist_next = firstmnt;
 		mlist->mlist_checked = 0;
 		mlist->mlist_dir = xalloc(strlen(mnt->mnt_dir)+1);
 		(void) strcpy(mlist->mlist_dir, mnt->mnt_dir);
 		mlist->mlist_fsname = xalloc(strlen(mnt->mnt_fsname)+1);
 		(void) strcpy(mlist->mlist_fsname, mnt->mnt_fsname);
-		mlist->mlist_isnfs = !strcmp(mnt->mnt_type, MNTTYPE_NFS);
+		mlist->mlist_isnfs = !strcmp(mnt->mnt_type, MNTTYPE_NFS) ||
+			(mlist->mlist_pid && !strcmp(mnt->mnt_type, "autofs"));
 		firstmnt = mlist;
 	}
 	(void) endmntent(mounted);
