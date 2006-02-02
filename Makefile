@@ -2,6 +2,7 @@
 # $Header$
 #
 SHELL	= /bin/sh
+VERSION = 1.7
 
 PREFIX = /usr/local
 ###  Where executable should be put
@@ -13,34 +14,26 @@ CDEBUGFLAGS=-g
 
 ### HP-UX
 #CFLAGS = $(CDEBUGFLAGS) -D_XPG2
-#EXTRAOBJS= getwd.o
 #LIBS=
 
 ### SGI
 #CFLAGS = $(CDEBUGFLAGS) -I. -I/usr/include/sun -I/usr/include/bsd
-#EXTRAOBJS=
 #LIBS= -lsun -lbsd
 
 # OSF/1
 # CFLAGS = $(CDEBUGFLAGS) -std
-# EXTRAOBJS=
 # LIBS=
 
 ###  SunOS, Ultrix, NeXT and the rest of the lot
 CFLAGS = $(CDEBUGFLAGS)
-EXTRAOBJS=
 LIBS=
 
 # Solaris
 CFLAGS = $(CDEBUGFLAGS)
-EXTRAOBJS=
 LIBS= -lnsl
 
 ###  Suffix for man page
-#MANSUFFIX = 1l
 MANSUFFIX = 1
-#MANSUFFIX = l
-#MANSUFFIX = 1local
 
 ###
 ###  End of configuration section
@@ -51,8 +44,8 @@ PROG = cknfs
 
 all:	$(PROG)
 
-cknfs:	cknfs.o $(EXTRAOBJS)
-	$(CC) -o cknfs cknfs.o $(EXTRAOBJS) $(LIBS)
+cknfs:	cknfs.o
+	$(CC) -o cknfs cknfs.o $(LIBS)
 
 install:	$(PROG)
 	rm -f $(DESTDIR)/$(PROG)
@@ -61,6 +54,12 @@ install:	$(PROG)
 	rm -f $(MANDIR)/$(MANPAGE)
 	cp cknfs.man $(MANDIR)/$(MANPAGE)
 	chmod 644 $(MANDIR)/$(MANPAGE)
+
+dist:
+	mkdir cknfs-$(VERSION)
+	cp README Makefile cknfs.c cknfs.man cknfs-$(VERSION)
+	tar zcf cknfs-$(VERSION).tar.gz cknfs-$(VERSION)
+	rm -rf cknfs-$(VERSION)
 
 clean:
 	rm -f *.o core cknfs
