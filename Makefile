@@ -2,7 +2,7 @@
 # $Header$
 #
 SHELL	= /bin/sh
-VERSION = 1.7
+VERSION = 1.8
 
 PREFIX = /usr/local
 ###  Where executable should be put
@@ -13,24 +13,21 @@ MANDIR	= $(PREFIX)/share/man/man1
 CDEBUGFLAGS=-g
 
 ### HP-UX
-#CFLAGS = $(CDEBUGFLAGS) -D_XPG2
+HPUX_CFLAGS = -D_XPG2
 #LIBS=
 
 ### SGI
-#CFLAGS = $(CDEBUGFLAGS) -I. -I/usr/include/sun -I/usr/include/bsd
+SGI_CFLAGS = -I/usr/include/sun -I/usr/include/bsd
 #LIBS= -lsun -lbsd
 
 # OSF/1
 # CFLAGS = $(CDEBUGFLAGS) -std
 # LIBS=
 
-###  SunOS, Ultrix, NeXT and the rest of the lot
-CFLAGS = $(CDEBUGFLAGS)
-LIBS=
 
 # Solaris
-CFLAGS = $(CDEBUGFLAGS)
-LIBS= -lnsl
+CFLAGS = $(CDEBUGFLAGS) $(HPUX_CFLAGS) $(SGI_CFLAGS)
+LIBS = `[ -f /usr/lib/libnsl.so ] && echo -lnsl`
 
 ###  Suffix for man page
 MANSUFFIX = 1
@@ -44,16 +41,19 @@ PROG = cknfs
 
 all:	$(PROG)
 
-cknfs:	cknfs.o
-	$(CC) -o cknfs cknfs.o $(LIBS)
+$(PROG):	cknfs.o
+	$(CC) -o $(PROG) cknfs.o $(LIBS)
 
-install:	$(PROG)
+install: test
 	rm -f $(DESTDIR)/$(PROG)
 	cp $(PROG) $(DESTDIR)
 	chmod 755 $(DESTDIR)/$(PROG)
 	rm -f $(MANDIR)/$(MANPAGE)
 	cp cknfs.man $(MANDIR)/$(MANPAGE)
 	chmod 644 $(MANDIR)/$(MANPAGE)
+
+test:	all
+	[ "`./cknfs -u / /VERY-UNLIKELY-PATH / /etc 2>/dev/null`" = "/ /etc" ]
 
 dist:
 	mkdir cknfs-$(VERSION)

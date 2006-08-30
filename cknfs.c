@@ -90,6 +90,7 @@
 #include <rpc/pmap_clnt.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <setjmp.h>
 
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
@@ -281,7 +282,6 @@ register struct m_mlist *mlist;
 	struct timeval interval;
 	unsigned short port = 0;
 	struct pmap pmap;
-	enum clnt_stat rpc_stat;
 	static char p[MAXPATHLEN];
 
 	if (Dflg)
@@ -344,10 +344,8 @@ register struct m_mlist *mlist;
 	tottimeout.tv_usec = 0;
 	/* warning about mismatched type for xdr_pmap and xdr_u_short
 	   is a header bug */
-	if ((rpc_stat = clnt_call(client, PMAPPROC_GETPORT,
-				  xdr_pmap, (caddr_t)&pmap,
-				  xdr_u_short, (caddr_t)&port,
-				  tottimeout)) != RPC_SUCCESS) {
+	if (clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap,
+		      xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, p);
 		clnt_destroy(client);
 		return 0;
@@ -374,9 +372,8 @@ register struct m_mlist *mlist;
 	tottimeout.tv_sec = timeout;
 	tottimeout.tv_usec = 0;
 	/* warning about mismatched type for xdr_void is a Linux header bug */
-	if ((rpc_stat = clnt_call(client, NULLPROC, xdr_void, (char *)NULL,
-				  xdr_void, (char *)NULL,
-				  tottimeout)) != RPC_SUCCESS) {
+	if (clnt_call(client, NULLPROC, xdr_void, NULL, xdr_void, NULL,
+		      tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, p);
 		clnt_destroy(client);
 		return 0;
@@ -412,7 +409,20 @@ char *path;
 	return NULL;
 }
 
+typedef void (*sighandler_t)(int);
+
 #define NTERMS 256
+
+jmp_buf alarmclock;
+
+void
+sigalrm(signum)
+	int signum;
+{
+	if (Dflg)
+		fprintf(stderr, "caught SIGALRM\n");
+	longjmp(alarmclock, 1);
+}
 
 int
 _chkpath(path, maxdepth)
@@ -457,6 +467,14 @@ int maxdepth;
 	}
 	/*  queue[front] = a, queue[front+1] = b, ... queue[back] = null */
 
+	/* The code below may make some unsafe calls to stat, so set
+	 * the alarm to catch problems.
+	 */
+	signal(SIGALRM, sigalrm);
+	alarm(2);
+	if (setjmp(alarmclock))
+		goto fail;
+
 	/*
 	 * Scan queue of directory terms, expanding 
 	 * symbolic links recursively.
@@ -483,8 +501,7 @@ int maxdepth;
 
 		if ((mlist = isnfsmnt(prefix)) != NULL) /* NFS mount? */
 			if (chknfsmnt(mlist) <= 0)
-				return 0;
-
+				goto fail;
 		/* Check if symlink */
 		if (lstat(s, &stb) < 0) {
 			perror(prefix);
@@ -493,8 +510,10 @@ int maxdepth;
 		if ((stb.st_mode & S_IFMT) != S_IFLNK) {
 			/* not symlink */
 			if (chdir(s) < 0) {
-				if (fflg)
+				if (fflg) {
+					alarm(0);
 					return 1;
+				}
 				perror(prefix);
 				goto fail;
 			}
@@ -518,12 +537,13 @@ int maxdepth;
 		 */
 
 		if (_chkpath(symlink, maxdepth-1) == 0)
-			return 0;
+			goto fail;
 	}
-
+	alarm(0);
 	return 1;
 
 fail:
+	alarm(0);
 	return 0;
 }
 	
@@ -624,16 +644,18 @@ mkm_mlist()
 		exit(1);
 	}
 	while ((mnt = getmntent(mounted)) != NULL) {
-		char dummy1[MAXPATHLEN];
-		int  pid;
-
 		mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
 		mlist->mlist_pid = 0;
 #ifdef linux
 		/* remember the local automounter with funny entry */
-		if (sscanf(mnt->mnt_fsname, "%[^(](pid%d)",
-			   dummy1, &pid) == 2) {
-			mlist->mlist_pid = pid;
+		{
+			char dummy1[MAXPATHLEN];
+			int  pid;
+
+			if (sscanf(mnt->mnt_fsname, "%[^(](pid%d)",
+				   dummy1, &pid) == 2) {
+				mlist->mlist_pid = pid;
+			}
 		}
 #endif
 		mlist->mlist_next = firstmnt;
