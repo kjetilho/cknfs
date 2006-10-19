@@ -266,6 +266,101 @@ char *host;
 	return 1;
 }
 
+/* portability note: Ultrix doesn't have clnt_create, so we wrap
+   clntudp_create and clnttcp_create ourselves. */
+
+static CLIENT *
+create_udp_client(saddr, port, prog, vers)
+     struct sockaddr_in *saddr;
+     int port, prog, vers;
+{
+	int sock = RPC_ANYSOCK;
+	struct timeval interval;
+
+	interval.tv_sec = 1;  /* retry interval */
+	interval.tv_usec = 0;
+	saddr->sin_port = htons(port);
+	return clntudp_create(saddr, prog, vers, interval, &sock);
+}
+
+static CLIENT *
+create_tcp_client(saddr, port, prog, vers)
+     struct sockaddr_in *saddr;
+     int port, prog, vers;
+{
+	int sock = RPC_ANYSOCK;
+
+	saddr->sin_port = htons(port);
+	return clnttcp_create(saddr, prog, vers, &sock, 0, 0);
+}
+
+static int
+chknfsmntproto(hostname, clntcreat, saddr)
+     const char *hostname;
+     CLIENT *(*clntcreat)();
+     struct sockaddr_in *saddr;
+{
+	CLIENT *client;
+	struct pmap pmap;
+	struct timeval tottimeout;
+	unsigned short port = 0;
+	
+	/*
+	 * Get socket to remote portmapper
+	 */
+	client = clntcreat(saddr, PMAPPORT, PMAPPROG, PMAPVERS);
+	if (client == NULL) {
+		clnt_pcreateerror(hostname);
+		return 0;
+	}
+
+	/*
+	 * Query portmapper for port # of NFS server
+	 */
+	pmap.pm_prog = NFS_PROGRAM;
+	pmap.pm_vers = NFS_VERSION;
+	pmap.pm_prot = IPPROTO_UDP;
+	pmap.pm_port = 0;
+	tottimeout.tv_sec = timeout;  /* total timeout */
+	tottimeout.tv_usec = 0;
+	/* warning about mismatched type for xdr_pmap and xdr_u_short
+	   is a header bug */
+	if (clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap,
+		      xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
+		clnt_perror(client, hostname);
+		clnt_destroy(client);
+		return 0;
+	}
+	clnt_destroy(client);
+
+	if (port == 0) {
+		fprintf(stderr, "%s: NFS server not registered\n", hostname);
+		return 0;
+	}
+	/*
+	 * Get socket to NFS server
+	 */
+	client = clntcreat(saddr, port, NFS_PROGRAM, NFS_VERSION);
+	if (client == NULL) {
+		clnt_pcreateerror(hostname);
+		return 0;
+	}
+	/*
+	 * Ping NFS server
+	 */
+	tottimeout.tv_sec = timeout;
+	tottimeout.tv_usec = 0;
+	/* warning about mismatched type for xdr_void is a Linux header bug */
+	if (clnt_call(client, NULLPROC, xdr_void, NULL, xdr_void, NULL,
+		      tottimeout) != RPC_SUCCESS) {
+		clnt_perror(client, hostname);
+		clnt_destroy(client);
+		return 0;
+	}
+	clnt_destroy(client);
+	return 1;
+}
+
 int
 chknfsmnt(mlist)
 /*
@@ -275,13 +370,8 @@ register struct m_mlist *mlist;
 {
 	register char *s;
 	register struct m_mlist *mlist2;
-	CLIENT *client;
 	struct sockaddr_in saddr;
-	int sock, len;
-	struct timeval tottimeout;
-	struct timeval interval;
-	unsigned short port = 0;
-	struct pmap pmap;
+	int len;
 	static char p[MAXPATHLEN];
 
 	if (Dflg)
@@ -315,70 +405,17 @@ register struct m_mlist *mlist;
 	mlist->mlist_checked = -1; /* set failed */
 	if (vflg)
 		fprintf(stderr, "Checking %s..\n", p);
-	interval.tv_sec = 2;  /* retry interval */
-	interval.tv_usec = 0;
 
 	/*
 	 * Parse internet address
 	 */
 	if (get_inaddr(&saddr, p) == 0)
 		return 0;
-	/*
-	 * Get socket to remote portmapper
-	 */
-	saddr.sin_port = htons(PMAPPORT);
-	sock = RPC_ANYSOCK;
-	if ((client = clntudp_create(&saddr, PMAPPROG, PMAPVERS, interval, 
-			&sock)) == NULL) {
-		clnt_pcreateerror(p);
-		return 0;
-	}
-	/*
-	 * Query portmapper for port # of NFS server
-	 */
-	pmap.pm_prog = NFS_PROGRAM;
-	pmap.pm_vers = NFS_VERSION;
-	pmap.pm_prot = IPPROTO_UDP;
-	pmap.pm_port = 0;
-	tottimeout.tv_sec = timeout;  /* total timeout */
-	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_pmap and xdr_u_short
-	   is a header bug */
-	if (clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap,
-		      xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
-		clnt_perror(client, p);
-		clnt_destroy(client);
-		return 0;
-	}
-	clnt_destroy(client);
 
-	if (port == 0) {
-		fprintf(stderr, "%s: NFS server not registered\n", p);
+	if (!chknfsmntproto(p, create_tcp_client, &saddr) &&
+	    !chknfsmntproto(p, create_udp_client, &saddr))
 		return 0;
-	}
-	/*
-	 * Get socket to NFS server
-	 */
-	saddr.sin_port = htons(port);
-	sock = RPC_ANYSOCK;
-	if ((client = clntudp_create(&saddr, NFS_PROGRAM, NFS_VERSION,
-				     interval, &sock)) == NULL) {
-		clnt_pcreateerror(p);
-		return 0;
-	}
-	/*
-	 * Ping NFS server
-	 */
-	tottimeout.tv_sec = timeout;
-	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_void is a Linux header bug */
-	if (clnt_call(client, NULLPROC, xdr_void, NULL, xdr_void, NULL,
-		      tottimeout) != RPC_SUCCESS) {
-		clnt_perror(client, p);
-		clnt_destroy(client);
-		return 0;
-	}
-	clnt_destroy(client);
+
 	mlist->mlist_checked = 1; /* set success */
 	if (vflg)
 		fprintf(stderr, "%s ok\n", p);
@@ -471,7 +508,7 @@ int maxdepth;
 	 * the alarm to catch problems.
 	 */
 	signal(SIGALRM, sigalrm);
-	alarm(2);
+	alarm(2 * timeout);
 	if (setjmp(alarmclock))
 		goto fail;
 
