@@ -2,7 +2,7 @@
 # $Header$
 #
 SHELL	= /bin/sh
-VERSION = 1.8
+VERSION = 1.9
 
 PREFIX = /usr/local
 ###  Where executable should be put
@@ -25,9 +25,11 @@ SGI_CFLAGS = -I/usr/include/sun -I/usr/include/bsd
 # LIBS=
 
 
-# Solaris
 CFLAGS = $(CDEBUGFLAGS) $(HPUX_CFLAGS) $(SGI_CFLAGS)
-LIBS = `[ -f /usr/lib/libnsl.so ] && echo -lnsl`
+
+# Many but not all OS require -lnsl, so we test for existence of the
+# shared library.  HP-UX names it .sl, not .so
+LIBS = `[ -f /usr/lib/libnsl.so -o -f /usr/lib/libnsl.sl ] && echo -lnsl`
 
 ###  Suffix for man page
 MANSUFFIX = 1
@@ -53,7 +55,9 @@ install: test
 	chmod 644 $(MANDIR)/$(MANPAGE)
 
 test:	all
-	[ "`./cknfs -u / /VERY-UNLIKELY-PATH / /etc 2>/dev/null`" = "/ /etc" ]
+	here=`/bin/pwd`; \
+	[ "`./cknfs -u $$here / /VERY-UNLIKELY-PATH / /etc 2>/dev/null`" = \
+          "$$here / /etc" ]
 
 dist:
 	mkdir cknfs-$(VERSION)
