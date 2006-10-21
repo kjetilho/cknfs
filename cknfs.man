@@ -75,3 +75,11 @@ and/or regular directories with NFS directories from
 .I /nfs
 directory with local subdirectories for each server machine and with
 mount points located therein.
+.PP
+.I cknfs
+will try to use TCP to connect to the NFS server, then UDP if it
+fails.  This may cause a mount to be reported as healthy even when it
+isn't.
+.I cknfs
+should try to find this information in the mount table
+instead, but whether "udp" or "tcp" is default will vary with OS.
