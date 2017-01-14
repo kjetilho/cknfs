@@ -114,6 +114,17 @@ extern char *realloc(), *malloc();
 extern char *strchr(), *strrchr(), *strtok();
 #endif
 
+#ifdef __GNUC__
+# define UNUSED  __attribute__((unused))
+#else
+# define UNUSED
+#endif
+#ifndef INADDR_NONE
+/* old OS without INADDR_NONE probably don't have in_addr_t */
+# define INADDR_NONE ((unsigned int)-1)
+# error foo
+#endif
+
 struct m_mlist {
 	int mlist_checked; /* -1 if bad, 0 if not checked, 1 if ok */
 	struct m_mlist *mlist_next;
@@ -137,7 +148,7 @@ xalloc(size)
  */
 int size;
 {
-	register char *mem;
+	char *mem;
 	
 	if ((mem = (char *)malloc((unsigned)size)) == NULL) {
 		(void) fprintf(stderr, "out of memory\n");
@@ -154,7 +165,7 @@ xrealloc(orig, size)
 void *orig;
 int size;
 {
-	register char *mem;
+	char *mem;
 
 	if (orig == NULL)
 		return(xalloc(size));
@@ -251,11 +262,11 @@ get_inaddr(saddr, host)
 struct sockaddr_in *saddr;
 char *host;
 {
-	register struct hostent *hp;
+	struct hostent *hp;
 
 	(void) memset((char *)saddr, 0, sizeof(struct sockaddr_in));
 	saddr->sin_family = AF_INET;
-	if ((saddr->sin_addr.s_addr = inet_addr(host)) == -1) {
+	if ((saddr->sin_addr.s_addr = inet_addr(host)) == INADDR_NONE) {
 		if ((hp = gethostbyname(host)) == NULL) {
 			fprintf(stderr, "%s: unknown host\n", host);
 			return 0;
@@ -323,10 +334,10 @@ chknfsmntproto(hostname, clntcreat, saddr)
 	pmap.pm_port = 0;
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_pmap and xdr_u_short
-	   is a header bug */
-	if (clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap,
-		      xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
+	/* on Linux xdr_pmap and xdr_u_short have mismatched type
+	   due to a header bug, so we add explicit casts */
+	if (clnt_call(client, PMAPPROC_GETPORT, (xdrproc_t)xdr_pmap, (caddr_t)&pmap,
+		      (xdrproc_t)xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, hostname);
 		clnt_destroy(client);
 		return 0;
@@ -350,8 +361,9 @@ chknfsmntproto(hostname, clntcreat, saddr)
 	 */
 	tottimeout.tv_sec = timeout;
 	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_void is a Linux header bug */
-	if (clnt_call(client, NULLPROC, xdr_void, NULL, xdr_void, NULL,
+	/* on Linux xdr_void has mismatched type due to a header bug,
+	   so we add explicit casts */
+	if (clnt_call(client, NULLPROC, (xdrproc_t)xdr_void, NULL, (xdrproc_t)xdr_void, NULL,
 		      tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, hostname);
 		clnt_destroy(client);
@@ -366,10 +378,10 @@ chknfsmnt(mlist)
 /*
  * Ping the NFS server indicated by the given mnt entry
  */
-register struct m_mlist *mlist;
+struct m_mlist *mlist;
 {
-	register char *s;
-	register struct m_mlist *mlist2;
+	char *s;
+	struct m_mlist *mlist2;
 	struct sockaddr_in saddr;
 	int len;
 	static char p[MAXPATHLEN];
@@ -429,7 +441,7 @@ isnfsmnt(path)
  */
 char *path;
 {
-	register struct m_mlist *mlist;
+	struct m_mlist *mlist;
 	static int init;
 
 	if (init == 0) {
@@ -454,7 +466,7 @@ jmp_buf alarmclock;
 
 void
 sigalrm(signum)
-	int signum;
+	int signum UNUSED;
 {
 	if (Dflg)
 		fprintf(stderr, "caught SIGALRM\n");
@@ -466,8 +478,8 @@ _chkpath(path, maxdepth)
 char *path;
 int maxdepth;
 {
-	register char *s, *s2;
-	register int i, front=0, back=0;
+	char *s, *s2;
+	int i, front=0, back=0;
 	struct stat stb;
 	struct m_mlist *mlist;
 	char p[MAXPATHLEN];
@@ -773,8 +785,8 @@ main(argc, argv)
 int argc;
 char **argv;
 {
-	register int n;
-	register char *s;
+	int n;
+	char *s;
 	int good = 0;
 	char outbuf[BUFSIZ];
 	char errbuf[BUFSIZ];
