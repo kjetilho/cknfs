@@ -102,7 +102,7 @@
 # include <nfs/nfs.h>
 #endif
 
-#define DEFAULT_TIMEOUT 10  /* Default timeout for checking NFS server */
+#define DEFAULT_TIMEOUT 5  /* Default timeout for checking NFS server */
 
 #ifndef __STDC__
 extern char *realloc(), *malloc();
@@ -568,7 +568,7 @@ int maxdepth;
 	 * the alarm to catch problems.
 	 */
 	signal(SIGALRM, sigalrm);
-	alarm(2 * timeout);
+	alarm(timeout + 1);
 	if (setjmp(alarmclock))
 		goto fail;
 
@@ -964,7 +964,7 @@ char **argv;
 		fprintf(stderr, "\t -f\taccept ordinary files\n");
 		fprintf(stderr, "\t -s\tprint paths in sh format (semicolons)\n");
 		fprintf(stderr, "\t -t n\ttimeout interval before assuming an NFS\n");
-		fprintf(stderr, "\t\tserver is dead (default 10 seconds)\n");
+		fprintf(stderr, "\t\tserver is dead (default 5 seconds)\n");
 		fprintf(stderr, "\t -u\tunique paths\n");
 		fprintf(stderr, "\t -v\tverbose\n");
 		fprintf(stderr, "\t -D\tdebug\n");
