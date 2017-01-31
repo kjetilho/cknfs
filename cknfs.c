@@ -129,7 +129,7 @@ struct m_mlist {
 static struct m_mlist *firstmnt;
 
 static int errflg;
-static int eflg, fflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
+static int eflg, fflg, qflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
 static int timeout = DEFAULT_TIMEOUT;
 static int nfs_version = 3;
 static char prefix[MAXPATHLEN];
@@ -601,7 +601,8 @@ int maxdepth;
 				goto fail;
 		/* Check if symlink */
 		if (lstat(s, &stb) < 0) {
-			perror(prefix);
+			if (errno != ENOENT || !qflg)
+				perror(prefix);
 			goto fail;
 		}
 		if ((stb.st_mode & S_IFMT) != S_IFLNK) {
@@ -929,11 +930,13 @@ char **argv;
 	setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf));
 	setvbuf(stderr, errbuf, _IOLBF, sizeof(errbuf));
 
-	while ((n = getopt(argc, argv, "efst:uvDHL")) != EOF)
+	while ((n = getopt(argc, argv, "efqst:uvDHL")) != EOF)
 		switch(n) {
 			case 'e':	++eflg;
 					break;
 			case 'f':	++fflg;
+					break;
+			case 'q':	++qflg;
 					break;
 			case 's':	++sflg;
 					break;
@@ -956,12 +959,13 @@ char **argv;
 		++errflg;
 
 	if (errflg) {
-		fprintf(stderr, "Usage: %s -e -f -s -t# -u -v -D -L paths\n",
+		fprintf(stderr, "Usage: %s -e -f -q -s -t# -u -v -D -L paths\n",
 			argv[0]);
 		fprintf(stderr, "\tCheck paths for dead NFS servers\n");
 		fprintf(stderr, "\tGood paths are printed to stdout\n\n");
 		fprintf(stderr, "\t -e\tsilent, do not print paths\n");
 		fprintf(stderr, "\t -f\taccept ordinary files\n");
+		fprintf(stderr, "\t -q\tquiet, omit diagnostics about missing files\n");
 		fprintf(stderr, "\t -s\tprint paths in sh format (semicolons)\n");
 		fprintf(stderr, "\t -t n\ttimeout interval before assuming an NFS\n");
 		fprintf(stderr, "\t\tserver is dead (default 5 seconds)\n");
