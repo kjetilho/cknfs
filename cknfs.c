@@ -91,6 +91,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <assert.h>
+#include <sys/select.h>
 
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
@@ -123,8 +125,7 @@ struct m_mlist {
 	int mlist_pid;	/* if pid is set, only check automount process */
 	int nfs_version;
 	int proto;
-	int mountproto;
-	struct sockaddr_in *mountaddr;
+	struct addrinfo *mountaddr;
 };
 static struct m_mlist *firstmnt;
 
@@ -248,48 +249,163 @@ struct m_mlist *mlist;
 }
 
 static int
-get_inaddr(saddr, host)
+translate_hostname(host, proto, result)
 /*
  * Translate host name to Internet address.
  * Return 1 if ok, 0 if error
  */
-struct sockaddr_in *saddr;
-char *host;
+const char *host;
+int proto;
+struct addrinfo **result;
 {
-	struct hostent *hp;
+        struct addrinfo hints;
+        int ret;
 
-	(void) memset((char *)saddr, 0, sizeof(struct sockaddr_in));
-	saddr->sin_family = AF_INET;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        switch (proto) {
+        case IPPROTO_UDP:
+                hints.ai_socktype = SOCK_DGRAM; break;
+        case IPPROTO_TCP:
+                hints.ai_socktype = SOCK_STREAM; break;
+        }
+        hints.ai_flags = AI_ADDRCONFIG;
 	if (Dflg)
 		fprintf(stderr, "looking up %s\n", host);
-	if ((saddr->sin_addr.s_addr = inet_addr(host)) == INADDR_NONE) {
-		if ((hp = gethostbyname(host)) == NULL) {
-			fprintf(stderr, "%s: unknown host\n", host);
-			return 0;
-		}
-		(void) memcpy((char *)&saddr->sin_addr, hp->h_addr,
-			hp->h_length);
-	}
-	return 1;
+        ret = getaddrinfo(host, NULL, &hints, result);
+        if (ret != 0) {
+                fprintf(stderr, "%s: getaddrinfo returned %s\n",
+                        host, gai_strerror(ret));
+        }
+        return ret == 0;
+}
+
+static int
+translate_address(addr, proto, result)
+/*
+ * Translate textual IP address to addrinfo struct
+ * Return 1 if ok, 0 if error
+ */
+const char *addr;
+int proto;
+struct addrinfo **result;
+{
+        struct addrinfo hints;
+        char *copy = NULL;
+        const char *address = addr;
+        int ret;
+
+	if (Dflg)
+		fprintf(stderr, "translating %s\n", addr);
+
+        if (addr[0] == '[') {
+                int len;
+                len = strlen(addr);
+                if (addr[len] != ']') {
+                        fprintf(stderr, "%s: malformed, expected to end with ]\n",
+                                addr);
+                        return 0;
+                }
+                copy = xalloc(len);
+                strcpy(copy, addr);
+                copy[len-1] = 0;
+                address = copy;
+        }
+                        
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        switch (proto) {
+        case IPPROTO_UDP:
+                hints.ai_socktype = SOCK_DGRAM; break;
+        case IPPROTO_TCP:
+                hints.ai_socktype = SOCK_STREAM; break;
+        }
+        hints.ai_flags = AI_ADDRCONFIG;
+        ret = getaddrinfo(address, NULL, &hints, result);
+        if (ret != 0) {
+                fprintf(stderr, "%s: getaddrinfo returned %s\n",
+                        address, gai_strerror(ret));
+        }
+        if (copy != address)
+                free(copy);
+        return ret == 0;
 }
 
 /* portability note: Ultrix doesn't have clnt_create, so we wrap
    clntudp_create and clnttcp_create ourselves. */
+
+static int
+connected_socket(saddr, port, proto)
+     struct sockaddr_in *saddr;
+     int port, proto;
+{
+	int sock;
+        int len;
+        int flags;
+        int socktype;
+        char *protoname;
+
+        if (proto == IPPROTO_UDP) {
+                socktype = SOCK_DGRAM;
+                protoname = "UDP";
+        } else {
+                socktype =SOCK_STREAM;
+                protoname = "TCP";
+        }
+
+        if (Dflg)
+                fprintf(stderr, "Creating IPv%d %s client, port is %d\n",
+                        saddr->sin_family == AF_INET ? 4 : 6,
+                        protoname,
+                        port);
+
+	saddr->sin_port = htons(port);
+        if (saddr->sin_family == AF_INET6) {
+                sock = socket(PF_INET6, socktype, proto);
+                len = sizeof(struct sockaddr_in6);
+        } else {
+                sock = socket(PF_INET, socktype, proto);
+                len = sizeof(struct sockaddr_in);
+        }
+        flags = fcntl(sock, F_GETFL);
+        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        {
+                int ret;
+                ret = connect(sock, (struct sockaddr *) saddr, len);
+                if (ret != 0 && errno == EINPROGRESS) {
+                        struct timeval tv;
+                        fd_set fds;
+
+                        FD_ZERO(&fds);
+                        tv.tv_sec = timeout;
+                        tv.tv_usec = 0;
+
+                        while (1) {
+                                FD_SET(sock, &fds);
+                                ret = select(sock+1, NULL, &fds, NULL, &tv);
+                                if (ret == 0) {
+                                        /* timeout */
+                                        errno = ETIME;
+                                        return -1;
+                                } else if (ret > 0)
+                                        break;
+                        }
+                }
+        }
+        fcntl(sock, F_SETFL, flags);
+        return sock;
+}
 
 static CLIENT *
 create_udp_client(saddr, port, prog, vers)
      struct sockaddr_in *saddr;
      int port, prog, vers;
 {
-	int sock = RPC_ANYSOCK;
 	struct timeval interval;
+	int sock = connected_socket(saddr, port, IPPROTO_UDP);
+        if (sock == -1)
+                return NULL;
 
-	if (Dflg)
-		fprintf(stderr, "Creating UDP client, port is %d\n", port);
-
-	interval.tv_sec = 1;  /* retry interval */
-	interval.tv_usec = 0;
-	saddr->sin_port = htons(port);
 	return clntudp_create(saddr, prog, vers, interval, &sock);
 }
 
@@ -298,20 +414,20 @@ create_tcp_client(saddr, port, prog, vers)
      struct sockaddr_in *saddr;
      int port, prog, vers;
 {
-	int sock = RPC_ANYSOCK;
+	int sock = connected_socket(saddr, port, IPPROTO_TCP);
+        if (sock == -1)
+                return NULL;
 
-	if (Dflg)
-		fprintf(stderr, "Creating TCP client, port is %d\n", port);
-	saddr->sin_port = htons(port);
 	return clnttcp_create(saddr, prog, vers, &sock, 0, 0);
 }
 
 static int
-get_port_from_pmap(hostname, clntcreat, saddr, vers)
+get_port_from_pmap(hostname, clntcreat, saddr, vers, proto)
 	const char *hostname;
 	CLIENT *(*clntcreat)();
 	const struct sockaddr_in *saddr;
 	int vers;
+        int proto;
 {
 	CLIENT *client;
 	struct pmap pmap;
@@ -323,7 +439,11 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers)
 	 */
 	client = clntcreat(saddr, PMAPPORT, PMAPPROG, PMAPVERS);
 	if (client == NULL) {
-		clnt_pcreateerror(hostname);
+                if (rpc_createerr.cf_stat == RPC_SUCCESS)
+                        fprintf(stderr, "%s portmapper: %s\n",
+                                hostname, strerror(errno));
+                else
+                        clnt_pcreateerror(hostname);
 		return 0;
 	}
 
@@ -332,12 +452,12 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers)
 	 */
 	pmap.pm_prog = NFS_PROGRAM;
 	pmap.pm_vers = vers;
-	pmap.pm_prot = IPPROTO_UDP;
+	pmap.pm_prot = proto == 0 ? IPPROTO_UDP : proto;
 	pmap.pm_port = 0;
 
 	if (Dflg)
-		fprintf(stderr, "get port for NFS %d from portmapper\n",
-			vers);
+		fprintf(stderr, "get port for NFS v%d (proto %ld) from portmapper\n",
+			vers, pmap.pm_prot);
 
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
@@ -368,27 +488,46 @@ chknfsmntproto(hostname, clntcreat, mount)
 	CLIENT *client;
 	struct timeval tottimeout;
 	unsigned short port = 0;
+        struct addrinfo *rp;
 
 	if (mount->nfs_version < 4) {
-		CLIENT *(*pmapcreat)() = clntcreat;
-		if (mount->mountproto)
-			pmapcreat = mount->mountproto == IPPROTO_UDP ?
-				create_udp_client : create_tcp_client;
-		port = get_port_from_pmap(hostname, pmapcreat,
-					  mount->mountaddr, mount->nfs_version);
-		if (port == 0)
-			return 0;
+                rp = mount->mountaddr;
+                while (rp) {
+                        /* always use TCP for portmap queries */
+                        port = get_port_from_pmap(hostname,
+                                                  create_tcp_client,
+                                                  (struct sockaddr_in *)rp->ai_addr,
+                                                  mount->nfs_version,
+                                                  mount->proto);
+                        if (port)
+                                break;
+                        rp = rp->ai_next;
+                }
+                if (port == 0)
+                        return 0;
+                if (Dflg)
+                        fprintf(stderr, "portmapper returned port %d\n", port);
 	} else {
 		port = 2049;
 	}
 	/*
 	 * Get socket to NFS server
 	 */
-	client = clntcreat(mount->mountaddr, port, NFS_PROGRAM, nfs_version);
-	if (client == NULL) {
-		clnt_pcreateerror(hostname);
-		return 0;
+        rp = mount->mountaddr;
+        while (rp) {
+                client = clntcreat((struct sockaddr_in *)rp->ai_addr,
+                                   port, NFS_PROGRAM, nfs_version);
+                if (client)
+                        break;
+                rp = rp->ai_next;
 	}
+        if (client == NULL) {
+                if (rpc_createerr.cf_stat == RPC_SUCCESS)
+                        perror(hostname);
+                else
+                        clnt_pcreateerror(hostname);
+		return 0;
+        }
 	/*
 	 * Ping NFS server
 	 */
@@ -431,7 +570,12 @@ struct m_mlist *mlist;
 	 * Save path to working storage and strip colon
 	 */
 	(void) strncpy(p, mlist->mlist_fsname, sizeof(p)-1);
-	if ((s = strchr(p, ':')) != NULL)
+        if (p[0] == '[') {
+                s = strchr(p, ']');
+                assert(s);
+                assert(s[1] == ':');
+                s[1] = 0;
+        } else if  ((s = strchr(p, ':')) != NULL)
 		*s = '\0';
 	len = strlen(p);
 
@@ -454,8 +598,7 @@ struct m_mlist *mlist;
 	 * Parse internet address
 	 */
 	if (!mlist->mountaddr) {
-		mlist->mountaddr = xalloc(sizeof(struct sockaddr_in));
-		if (get_inaddr(mlist->mountaddr, p) == 0)
+		if (translate_hostname(p, mlist->proto, &mlist->mountaddr) == 0)
 			return 0;
 	}
 
@@ -817,23 +960,13 @@ mkm_mlist()
 					IPPROTO_TCP : IPPROTO_UDP;
 		}
 		{
-			const char *proto;
-			if ((proto = find_opt_val(mnt->mnt_opts, "mountproto")))
-				mlist->mountproto = strncmp(proto, "tcp", 3) == 0 ?
-					IPPROTO_TCP : IPPROTO_UDP;
-		}
-		{
 			char *addr;
 			if ((addr = copy_opt_val(mnt->mnt_opts, "mountaddr")) ||
 			    (addr = copy_opt_val(mnt->mnt_opts, "addr"))) {
-				struct sockaddr_in *sin = xalloc(sizeof(struct sockaddr_in));
 				if (Dflg)
 					fprintf(stderr, "%s: mountaddr is %s\n",
 						mnt->mnt_fsname, addr);
-				sin->sin_family = AF_INET;
-				sin->sin_addr.s_addr = inet_addr(addr);
-				mlist->mountaddr = sin;
-				free(addr);
+                                translate_address(addr, mlist->proto, &mlist->mountaddr);
 			}
 		}
 		mlist->mlist_next = firstmnt;
