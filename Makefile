@@ -1,5 +1,4 @@
 #
-# $Header$
 #
 SHELL	= /bin/sh
 VERSION = 1.9
