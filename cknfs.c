@@ -125,7 +125,6 @@ struct m_mlist {
 	int mlist_pid;	/* if pid is set, only check automount process */
 	int nfs_version;
 	int proto;
-	int mountproto;
 	struct addrinfo *mountaddr;
 };
 static struct m_mlist *firstmnt;
@@ -335,49 +334,37 @@ struct addrinfo **result;
 /* portability note: Ultrix doesn't have clnt_create, so we wrap
    clntudp_create and clnttcp_create ourselves. */
 
-static CLIENT *
-create_udp_client(saddr, port, prog, vers)
+static int
+connected_socket(saddr, port, proto)
      struct sockaddr_in *saddr;
-     int port, prog, vers;
-{
-	int sock = RPC_ANYSOCK;
-	struct timeval interval;
-
-	if (Dflg)
-		fprintf(stderr, "Creating UDP client, port is %d\n", port);
-
-	interval.tv_sec = 1;  /* retry interval */
-	interval.tv_usec = 0;
-	saddr->sin_port = htons(port);
-        if (saddr->sin_family == AF_INET6) {
-                sock = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
-        } else {
-                sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-        }
-	return clntudp_create(saddr, prog, vers, interval, &sock);
-}
-
-static CLIENT *
-create_tcp_client(saddr, port, prog, vers)
-     struct sockaddr_in *saddr;
-     int port, prog, vers;
+     int port, proto;
 {
 	int sock;
         int len;
         int flags;
+        int socktype;
+        char *protoname;
+
+        if (proto == IPPROTO_UDP) {
+                socktype = SOCK_DGRAM;
+                protoname = "UDP";
+        } else {
+                socktype =SOCK_STREAM;
+                protoname = "TCP";
+        }
+
+        if (Dflg)
+                fprintf(stderr, "Creating IPv%d %s client, port is %d\n",
+                        saddr->sin_family == AF_INET ? 4 : 6,
+                        protoname,
+                        port);
 
 	saddr->sin_port = htons(port);
         if (saddr->sin_family == AF_INET6) {
-                if (Dflg)
-                        fprintf(stderr, "Creating IPv6 TCP client, port is %d\n",
-                                port);
-                sock = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+                sock = socket(PF_INET6, socktype, proto);
                 len = sizeof(struct sockaddr_in6);
         } else {
-                if (Dflg)
-                        fprintf(stderr, "Creating IPv4 TCP client, port is %d\n",
-                                port);
-                sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+                sock = socket(PF_INET, socktype, proto);
                 len = sizeof(struct sockaddr_in);
         }
         flags = fcntl(sock, F_GETFL);
@@ -399,22 +386,48 @@ create_tcp_client(saddr, port, prog, vers)
                                 if (ret == 0) {
                                         /* timeout */
                                         errno = ETIME;
-                                        return NULL;
+                                        return -1;
                                 } else if (ret > 0)
                                         break;
                         }
                 }
         }
         fcntl(sock, F_SETFL, flags);
+        return sock;
+}
+
+static CLIENT *
+create_udp_client(saddr, port, prog, vers)
+     struct sockaddr_in *saddr;
+     int port, prog, vers;
+{
+	struct timeval interval;
+	int sock = connected_socket(saddr, port, IPPROTO_UDP);
+        if (sock == -1)
+                return NULL;
+
+	return clntudp_create(saddr, prog, vers, interval, &sock);
+}
+
+static CLIENT *
+create_tcp_client(saddr, port, prog, vers)
+     struct sockaddr_in *saddr;
+     int port, prog, vers;
+{
+	int sock = connected_socket(saddr, port, IPPROTO_TCP);
+        if (sock == -1)
+                return NULL;
+
 	return clnttcp_create(saddr, prog, vers, &sock, 0, 0);
 }
 
 static int
-get_port_from_pmap(hostname, clntcreat, saddr, vers)
+get_port_from_pmap(hostname, clntcreat, saddr, vers, proto)
 	const char *hostname;
 	CLIENT *(*clntcreat)();
 	const struct sockaddr_in *saddr;
 	int vers;
+        int proto;
 {
 	CLIENT *client;
 	struct pmap pmap;
@@ -426,7 +439,11 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers)
 	 */
 	client = clntcreat(saddr, PMAPPORT, PMAPPROG, PMAPVERS);
 	if (client == NULL) {
-		clnt_pcreateerror(hostname);
+                if (rpc_createerr.cf_stat == RPC_SUCCESS)
+                        fprintf(stderr, "%s portmapper: %s\n",
+                                hostname, strerror(errno));
+                else
+                        clnt_pcreateerror(hostname);
 		return 0;
 	}
 
@@ -435,12 +452,12 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers)
 	 */
 	pmap.pm_prog = NFS_PROGRAM;
 	pmap.pm_vers = vers;
-	pmap.pm_prot = IPPROTO_UDP;
+	pmap.pm_prot = proto == 0 ? IPPROTO_UDP : proto;
 	pmap.pm_port = 0;
 
 	if (Dflg)
-		fprintf(stderr, "get port for NFS %d from portmapper\n",
-			vers);
+		fprintf(stderr, "get port for NFS v%d (proto %ld) from portmapper\n",
+			vers, pmap.pm_prot);
 
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
@@ -474,22 +491,22 @@ chknfsmntproto(hostname, clntcreat, mount)
         struct addrinfo *rp;
 
 	if (mount->nfs_version < 4) {
-		CLIENT *(*pmapcreat)() = clntcreat;
-		if (mount->mountproto)
-			pmapcreat = mount->mountproto == IPPROTO_UDP ?
-				create_udp_client : create_tcp_client;
                 rp = mount->mountaddr;
                 while (rp) {
+                        /* always use TCP for portmap queries */
                         port = get_port_from_pmap(hostname,
-                                                  pmapcreat,
+                                                  create_tcp_client,
                                                   (struct sockaddr_in *)rp->ai_addr,
-                                                  mount->nfs_version);
+                                                  mount->nfs_version,
+                                                  mount->proto);
                         if (port)
                                 break;
                         rp = rp->ai_next;
                 }
                 if (port == 0)
                         return 0;
+                if (Dflg)
+                        fprintf(stderr, "portmapper returned port %d\n", port);
 	} else {
 		port = 2049;
 	}
@@ -940,12 +957,6 @@ mkm_mlist()
 			const char *proto;
 			if ((proto = find_opt_val(mnt->mnt_opts, "proto")))
 				mlist->proto = strncmp(proto, "tcp", 3) == 0 ?
-					IPPROTO_TCP : IPPROTO_UDP;
-		}
-		{
-			const char *proto;
-			if ((proto = find_opt_val(mnt->mnt_opts, "mountproto")))
-				mlist->mountproto = strncmp(proto, "tcp", 3) == 0 ?
 					IPPROTO_TCP : IPPROTO_UDP;
 		}
 		{
