@@ -7,22 +7,22 @@
  * NFS server?
  *
  * Well, this program fixes that problem.  It takes a list of execution
- * paths as arguments.   Each path is examined for an NFS mount point.
- * If found, the corresponding NFS server is checked.   Paths that lead
+ * paths as arguments.  Each path is examined for an NFS mount point.
+ * If found, the corresponding NFS server is checked.  Paths that lead
  * to dead NFS servers are ignored.  The remaining paths are printed to
  * stdout.  No more hung logins!
  *
  * Usage: cknfs -e -s -t# -u -v -D -L paths
  *  
- *       -e     silent, do not print paths
- *       -f	accept any type of file, not just directories
- *       -s     print paths in sh format (colons)
- *       -t n   timeout interval before assuming an NFS
- *              server is dead (default 10 seconds)
- *       -u     unique paths
- *       -v     verbose
- *       -D     debug
- *       -L     expand symbolic links
+ *	 -e	silent, do not print paths
+ *	 -f	accept any type of file, not just directories
+ *	 -s	print paths in sh format (colons)
+ *	 -t n	timeout interval before assuming an NFS
+ *		server is dead (default 10 seconds)
+ *	 -u	unique paths
+ *	 -v	verbose
+ *	 -D	debug
+ *	 -L	expand symbolic links
  *	 -H	print hostname pinged.
  *
  * Typical examples:
@@ -33,7 +33,7 @@
  * The latter example prevents you from hanging if you cd to a
  * directory that leads to a dead NFS server.
  *
- * Adminstrative note:  You can still get hung if your administator 
+ * Adminstrative note: You can still get hung if your administrator
  * mixes NFS mount points from different machines in the same parent
  * directory or if your administrator mixes regular directories and
  * NFS mount points in the same parent directory.
@@ -95,23 +95,23 @@
 #if defined(sgi)
   /* sgi is missing nfs.h, so we must hardcode the RPC values */
 # define NFS_PROGRAM 100003L
-# define NFS_VERSION 2L
 #else
 # ifdef __osf__
 #  include <sys/mount.h>
 # endif
-# if defined(linux)
-   /* not available in user headers? */
-#  define NFS_VERSION 2L
-# endif
 # include <nfs/nfs.h>
 #endif
 
-#define DEFAULT_TIMEOUT 10  /* Default timeout for checking NFS server */
+#define DEFAULT_TIMEOUT 5  /* Default timeout for checking NFS server */
 
 #ifndef __STDC__
 extern char *realloc(), *malloc();
 extern char *strchr(), *strrchr(), *strtok();
+#endif
+
+#ifndef INADDR_NONE
+/* old OS without INADDR_NONE probably don't have in_addr_t either */
+# define INADDR_NONE ((unsigned int)-1)
 #endif
 
 struct m_mlist {
@@ -121,12 +121,17 @@ struct m_mlist {
 	char *mlist_fsname;
 	int mlist_isnfs;
 	int mlist_pid;	/* if pid is set, only check automount process */
+	int nfs_version;
+	int proto;
+	int mountproto;
+	struct sockaddr_in *mountaddr;
 };
 static struct m_mlist *firstmnt;
 
 static int errflg;
-static int eflg, fflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
+static int eflg, fflg, qflg, sflg, vflg, Dflg, Hflg, Lflg, uflg;
 static int timeout = DEFAULT_TIMEOUT;
+static int nfs_version = 3;
 static char prefix[MAXPATHLEN];
 void mkm_mlist();
 
@@ -137,7 +142,7 @@ xalloc(size)
  */
 int size;
 {
-	register char *mem;
+	char *mem;
 	
 	if ((mem = (char *)malloc((unsigned)size)) == NULL) {
 		(void) fprintf(stderr, "out of memory\n");
@@ -154,7 +159,7 @@ xrealloc(orig, size)
 void *orig;
 int size;
 {
-	register char *mem;
+	char *mem;
 
 	if (orig == NULL)
 		return(xalloc(size));
@@ -173,10 +178,10 @@ char *path;
 	static int n = -1;
 	static int hist_size = 0;
 	static char **hist = NULL;
-        int i;
+	int i;
 
 	if (!uflg)
-	        return 1;
+		return 1;
 
 	if (++n >= hist_size) {
 		hist_size += 32;
@@ -185,7 +190,7 @@ char *path;
 	hist[n] = xalloc(strlen(path) + 1);
 	strcpy(hist[n], path);
 	for (i = 0; i < n; i++)
-	        if (hist[i] && strcmp(hist[i], hist[n]) == 0) {
+		if (hist[i] && strcmp(hist[i], hist[n]) == 0) {
 			--n;
 			return 0;
 		}
@@ -251,11 +256,13 @@ get_inaddr(saddr, host)
 struct sockaddr_in *saddr;
 char *host;
 {
-	register struct hostent *hp;
+	struct hostent *hp;
 
 	(void) memset((char *)saddr, 0, sizeof(struct sockaddr_in));
 	saddr->sin_family = AF_INET;
-	if ((saddr->sin_addr.s_addr = inet_addr(host)) == -1) {
+	if (Dflg)
+		fprintf(stderr, "looking up %s\n", host);
+	if ((saddr->sin_addr.s_addr = inet_addr(host)) == INADDR_NONE) {
 		if ((hp = gethostbyname(host)) == NULL) {
 			fprintf(stderr, "%s: unknown host\n", host);
 			return 0;
@@ -277,6 +284,9 @@ create_udp_client(saddr, port, prog, vers)
 	int sock = RPC_ANYSOCK;
 	struct timeval interval;
 
+	if (Dflg)
+		fprintf(stderr, "Creating UDP client, port is %d\n", port);
+
 	interval.tv_sec = 1;  /* retry interval */
 	interval.tv_usec = 0;
 	saddr->sin_port = htons(port);
@@ -290,21 +300,24 @@ create_tcp_client(saddr, port, prog, vers)
 {
 	int sock = RPC_ANYSOCK;
 
+	if (Dflg)
+		fprintf(stderr, "Creating TCP client, port is %d\n", port);
 	saddr->sin_port = htons(port);
 	return clnttcp_create(saddr, prog, vers, &sock, 0, 0);
 }
 
 static int
-chknfsmntproto(hostname, clntcreat, saddr)
-     const char *hostname;
-     CLIENT *(*clntcreat)();
-     struct sockaddr_in *saddr;
+get_port_from_pmap(hostname, clntcreat, saddr, vers)
+	const char *hostname;
+	CLIENT *(*clntcreat)();
+	const struct sockaddr_in *saddr;
+	int vers;
 {
 	CLIENT *client;
 	struct pmap pmap;
 	struct timeval tottimeout;
 	unsigned short port = 0;
-	
+
 	/*
 	 * Get socket to remote portmapper
 	 */
@@ -318,15 +331,21 @@ chknfsmntproto(hostname, clntcreat, saddr)
 	 * Query portmapper for port # of NFS server
 	 */
 	pmap.pm_prog = NFS_PROGRAM;
-	pmap.pm_vers = NFS_VERSION;
+	pmap.pm_vers = vers;
 	pmap.pm_prot = IPPROTO_UDP;
 	pmap.pm_port = 0;
+
+	if (Dflg)
+		fprintf(stderr, "get port for NFS %d from portmapper\n",
+			vers);
+
 	tottimeout.tv_sec = timeout;  /* total timeout */
 	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_pmap and xdr_u_short
-	   is a header bug */
-	if (clnt_call(client, PMAPPROC_GETPORT, xdr_pmap, (caddr_t)&pmap,
-		      xdr_u_short, (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
+	/* on Linux xdr_pmap and xdr_u_short have mismatched type
+	   due to a header bug, so we add explicit casts */
+	if (clnt_call(client, PMAPPROC_GETPORT, (xdrproc_t)xdr_pmap,
+		      (caddr_t)&pmap, (xdrproc_t)xdr_u_short,
+		      (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, hostname);
 		clnt_destroy(client);
 		return 0;
@@ -337,10 +356,35 @@ chknfsmntproto(hostname, clntcreat, saddr)
 		fprintf(stderr, "%s: NFS server not registered\n", hostname);
 		return 0;
 	}
+	return port;
+}
+
+static int
+chknfsmntproto(hostname, clntcreat, mount)
+     const char *hostname;
+     CLIENT *(*clntcreat)();
+     const struct m_mlist *mount;
+{
+	CLIENT *client;
+	struct timeval tottimeout;
+	unsigned short port = 0;
+
+	if (mount->nfs_version < 4) {
+		CLIENT *(*pmapcreat)() = clntcreat;
+		if (mount->mountproto)
+			pmapcreat = mount->mountproto == IPPROTO_UDP ?
+				create_udp_client : create_tcp_client;
+		port = get_port_from_pmap(hostname, pmapcreat,
+					  mount->mountaddr, mount->nfs_version);
+		if (port == 0)
+			return 0;
+	} else {
+		port = 2049;
+	}
 	/*
 	 * Get socket to NFS server
 	 */
-	client = clntcreat(saddr, port, NFS_PROGRAM, NFS_VERSION);
+	client = clntcreat(mount->mountaddr, port, NFS_PROGRAM, nfs_version);
 	if (client == NULL) {
 		clnt_pcreateerror(hostname);
 		return 0;
@@ -350,8 +394,9 @@ chknfsmntproto(hostname, clntcreat, saddr)
 	 */
 	tottimeout.tv_sec = timeout;
 	tottimeout.tv_usec = 0;
-	/* warning about mismatched type for xdr_void is a Linux header bug */
-	if (clnt_call(client, NULLPROC, xdr_void, NULL, xdr_void, NULL,
+	/* on Linux xdr_void has mismatched type due to a header bug,
+	   so we add explicit casts */
+	if (clnt_call(client, NULLPROC, (xdrproc_t)xdr_void, NULL, (xdrproc_t)xdr_void, NULL,
 		      tottimeout) != RPC_SUCCESS) {
 		clnt_perror(client, hostname);
 		clnt_destroy(client);
@@ -366,11 +411,10 @@ chknfsmnt(mlist)
 /*
  * Ping the NFS server indicated by the given mnt entry
  */
-register struct m_mlist *mlist;
+struct m_mlist *mlist;
 {
-	register char *s;
-	register struct m_mlist *mlist2;
-	struct sockaddr_in saddr;
+	char *s;
+	struct m_mlist *mlist2;
 	int len;
 	static char p[MAXPATHLEN];
 
@@ -409,12 +453,22 @@ register struct m_mlist *mlist;
 	/*
 	 * Parse internet address
 	 */
-	if (get_inaddr(&saddr, p) == 0)
-		return 0;
+	if (!mlist->mountaddr) {
+		mlist->mountaddr = xalloc(sizeof(struct sockaddr_in));
+		if (get_inaddr(mlist->mountaddr, p) == 0)
+			return 0;
+	}
 
-	if (!chknfsmntproto(p, create_tcp_client, &saddr) &&
-	    !chknfsmntproto(p, create_udp_client, &saddr))
-		return 0;
+	if (mlist->proto) {
+		if (!chknfsmntproto(p, mlist->proto == IPPROTO_UDP ?
+				    create_udp_client : create_tcp_client,
+				    mlist))
+			return 0;
+	} else {
+		if (!chknfsmntproto(p, create_tcp_client, mlist) &&
+		    !chknfsmntproto(p, create_udp_client, mlist))
+			return 0;
+	}
 
 	mlist->mlist_checked = 1; /* set success */
 	if (vflg)
@@ -429,7 +483,7 @@ isnfsmnt(path)
  */
 char *path;
 {
-	register struct m_mlist *mlist;
+	struct m_mlist *mlist;
 	static int init;
 
 	if (init == 0) {
@@ -437,11 +491,17 @@ char *path;
 		mkm_mlist();
 	}
 
+	if (Dflg)
+		fprintf(stderr, "isnfsmnt(%s)\n", path);
 	for (mlist = firstmnt; mlist != NULL; mlist = mlist->mlist_next) {
 		if (mlist->mlist_isnfs == 0)
 			continue;
-		if (strcmp(mlist->mlist_dir, path) == 0)
+		if (strcmp(mlist->mlist_dir, path) == 0) {
+			if (Dflg)
+				fprintf(stderr, "%s: contained in %s mounted from %s\n",
+					path, mlist->mlist_dir, mlist->mlist_fsname);
 			return(mlist);
+		}
 	}
 	return NULL;
 }
@@ -457,7 +517,7 @@ sigalrm(signum)
 	int signum;
 {
 	if (Dflg)
-		fprintf(stderr, "caught SIGALRM\n");
+		fprintf(stderr, "caught signal %d\n", signum);
 	longjmp(alarmclock, 1);
 }
 
@@ -466,8 +526,8 @@ _chkpath(path, maxdepth)
 char *path;
 int maxdepth;
 {
-	register char *s, *s2;
-	register int i, front=0, back=0;
+	char *s, *s2;
+	int i, front=0, back=0;
 	struct stat stb;
 	struct m_mlist *mlist;
 	char p[MAXPATHLEN];
@@ -508,7 +568,7 @@ int maxdepth;
 	 * the alarm to catch problems.
 	 */
 	signal(SIGALRM, sigalrm);
-	alarm(2 * timeout);
+	alarm(timeout + 1);
 	if (setjmp(alarmclock))
 		goto fail;
 
@@ -541,7 +601,8 @@ int maxdepth;
 				goto fail;
 		/* Check if symlink */
 		if (lstat(s, &stb) < 0) {
-			perror(prefix);
+			if (errno != ENOENT || !qflg)
+				perror(prefix);
 			goto fail;
 		}
 		if ((stb.st_mode & S_IFMT) != S_IFLNK) {
@@ -609,7 +670,7 @@ char *path;
 	
 	/* "/" becomes "", crude fix */
 	if (prefix[0] == 0)
-	        strcpy(prefix, "/");
+		strcpy(prefix, "/");
 
 	/* restore cwd so relative paths work next time around */
 	chdir(pwd);
@@ -617,6 +678,50 @@ char *path;
 	return ret;
 }
 
+/* Return point after '=' for opt in comma separated list */
+const char *
+find_opt_val(list, opt)
+	const char *list, *opt;
+{
+	int optlen;
+	char *search;
+	const char *found;
+
+	optlen = strlen(opt);
+	search = xalloc(optlen + 2);
+	strcpy(search + 1, opt);
+	search[0] = ',';
+	search[optlen+1] = '=';
+	search[optlen+2] = 0;
+	/* First check for first argument */
+	if (strncmp(list, search+1, optlen+1) == 0)
+		return list + optlen + 1;
+	else if ((found = strstr(list, search)))
+		return found + optlen + 2;
+	else
+		return NULL;
+}
+
+char *
+copy_opt_val(list, opt)
+	const char *list, *opt;
+{
+	const char *start;
+	const char *comma;
+	int length;
+	char *copy;
+
+	if ((start = find_opt_val(list, opt)) == NULL)
+		return NULL;
+
+	if ((comma = strchr(start, ',')))
+		length = comma - start;
+	else
+		length = strlen(start);
+	copy = xalloc(length);
+	strncpy(copy, start, length);
+	return copy;
+}
 
 /*
  * Begin machine dependent code for mount table 
@@ -642,12 +747,12 @@ mkm_mlist()
     }
 
     do {
-        i = getmntent(mounts, &mnt);
-        if (i > 0) {
+	i = getmntent(mounts, &mnt);
+	if (i > 0) {
 	    fprintf (stderr, "%s: getmntent returns %d\n", MNTTAB, i);
 	    exit (1);
 	} 
-        if (i == -1) break;
+	if (i == -1) break;
 	mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
 	mlist->mlist_next = firstmnt;
 	mlist->mlist_checked = 0;
@@ -683,8 +788,9 @@ mkm_mlist()
 	while ((mnt = getmntent(mounted)) != NULL) {
 		mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
 		mlist->mlist_pid = 0;
-#ifdef linux
-		/* remember the local automounter with funny entry */
+		mlist->nfs_version = 0;
+		mlist->mountaddr = NULL;
+		/* remember the local automounter with funny entry.  Linux only? */
 		{
 			char dummy1[MAXPATHLEN];
 			int  pid;
@@ -694,7 +800,42 @@ mkm_mlist()
 				mlist->mlist_pid = pid;
 			}
 		}
-#endif
+		{
+			const char *vers;
+			if ((vers = find_opt_val(mnt->mnt_opts, "vers")))
+				mlist->nfs_version = atoi(vers);
+			else if ((vers = find_opt_val(mnt->mnt_opts, "nfsvers")))
+				mlist->nfs_version = atoi(vers);
+			if (vers && Dflg)
+				fprintf(stderr, "%s: NFS version is %d\n",
+					mnt->mnt_fsname, mlist->nfs_version);
+		}
+		{
+			const char *proto;
+			if ((proto = find_opt_val(mnt->mnt_opts, "proto")))
+				mlist->proto = strncmp(proto, "tcp", 3) == 0 ?
+					IPPROTO_TCP : IPPROTO_UDP;
+		}
+		{
+			const char *proto;
+			if ((proto = find_opt_val(mnt->mnt_opts, "mountproto")))
+				mlist->mountproto = strncmp(proto, "tcp", 3) == 0 ?
+					IPPROTO_TCP : IPPROTO_UDP;
+		}
+		{
+			char *addr;
+			if ((addr = copy_opt_val(mnt->mnt_opts, "mountaddr")) ||
+			    (addr = copy_opt_val(mnt->mnt_opts, "addr"))) {
+				struct sockaddr_in *sin = xalloc(sizeof(struct sockaddr_in));
+				if (Dflg)
+					fprintf(stderr, "%s: mountaddr is %s\n",
+						mnt->mnt_fsname, addr);
+				sin->sin_family = AF_INET;
+				sin->sin_addr.s_addr = inet_addr(addr);
+				mlist->mountaddr = sin;
+				free(addr);
+			}
+		}
 		mlist->mlist_next = firstmnt;
 		mlist->mlist_checked = 0;
 		mlist->mlist_dir = xalloc(strlen(mnt->mnt_dir)+1);
@@ -702,6 +843,7 @@ mkm_mlist()
 		mlist->mlist_fsname = xalloc(strlen(mnt->mnt_fsname)+1);
 		(void) strcpy(mlist->mlist_fsname, mnt->mnt_fsname);
 		mlist->mlist_isnfs = !strcmp(mnt->mnt_type, MNTTYPE_NFS) ||
+			!strcmp(mnt->mnt_type, "nfs4") ||
 			(mlist->mlist_pid && !strcmp(mnt->mnt_type, "autofs"));
 		firstmnt = mlist;
 	}
@@ -759,7 +901,7 @@ mkm_mlist()
 		mlist->mlist_fsname = xalloc (strlen (fs[i].f_mntfromname) + 1);
 		(void) strcpy (mlist->mlist_fsname, fs[i].f_mntfromname);
 		mlist->mlist_isnfs = (fs[i].f_type == MOUNT_NFS);
-                firstmnt = mlist;
+		firstmnt = mlist;
 	}
 	free((char *)fs);
 }
@@ -773,8 +915,8 @@ main(argc, argv)
 int argc;
 char **argv;
 {
-	register int n;
-	register char *s;
+	int n;
+	char *s;
 	int good = 0;
 	char outbuf[BUFSIZ];
 	char errbuf[BUFSIZ];
@@ -788,11 +930,13 @@ char **argv;
 	setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf));
 	setvbuf(stderr, errbuf, _IOLBF, sizeof(errbuf));
 
-	while ((n = getopt(argc, argv, "efst:uvDHL")) != EOF)
+	while ((n = getopt(argc, argv, "efqst:uvDHL")) != EOF)
 		switch(n) {
 			case 'e':	++eflg;
 					break;
 			case 'f':	++fflg;
+					break;
+			case 'q':	++qflg;
 					break;
 			case 's':	++sflg;
 					break;
@@ -815,15 +959,16 @@ char **argv;
 		++errflg;
 
 	if (errflg) {
-		fprintf(stderr, "Usage: %s -e -f -s -t# -u -v -D -L paths\n",
+		fprintf(stderr, "Usage: %s -e -f -q -s -t# -u -v -D -L paths\n",
 			argv[0]);
 		fprintf(stderr, "\tCheck paths for dead NFS servers\n");
 		fprintf(stderr, "\tGood paths are printed to stdout\n\n");
 		fprintf(stderr, "\t -e\tsilent, do not print paths\n");
 		fprintf(stderr, "\t -f\taccept ordinary files\n");
+		fprintf(stderr, "\t -q\tquiet, omit diagnostics about missing files\n");
 		fprintf(stderr, "\t -s\tprint paths in sh format (semicolons)\n");
 		fprintf(stderr, "\t -t n\ttimeout interval before assuming an NFS\n");
-		fprintf(stderr, "\t\tserver is dead (default 10 seconds)\n");
+		fprintf(stderr, "\t\tserver is dead (default 5 seconds)\n");
 		fprintf(stderr, "\t -u\tunique paths\n");
 		fprintf(stderr, "\t -v\tverbose\n");
 		fprintf(stderr, "\t -D\tdebug\n");
@@ -833,10 +978,10 @@ char **argv;
 	}
 
 	if (uflg)
-	        newargv = (char **) xalloc((argc - optind) * sizeof(char *));
+		newargv = (char **) xalloc((argc - optind) * sizeof(char *));
 
 	for (n = optind; n < argc; ++n) {
-	        char *colon = NULL;
+		char *colon = NULL;
 
 		s = argv[n];
 		do {
