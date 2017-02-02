@@ -349,7 +349,7 @@ connected_socket(saddr, port, proto)
                 socktype = SOCK_DGRAM;
                 protoname = "UDP";
         } else {
-                socktype =SOCK_STREAM;
+                socktype = SOCK_STREAM;
                 protoname = "TCP";
         }
 
@@ -402,11 +402,16 @@ create_udp_client(saddr, port, prog, vers)
      int port, prog, vers;
 {
 	struct timeval interval;
-	int sock = connected_socket(saddr, port, IPPROTO_UDP);
+        struct sockaddr_in saddr_copy;
+	int sock;
+
+        sock = connected_socket(saddr, port, IPPROTO_UDP);
         if (sock == -1)
                 return NULL;
 
-	return clntudp_create(saddr, prog, vers, interval, &sock);
+        memcpy(&saddr_copy, saddr, sizeof(saddr_copy));
+        saddr_copy.sin_port = port;
+	return clntudp_create(&saddr_copy, prog, vers, interval, &sock);
 }
 
 static CLIENT *
@@ -422,12 +427,13 @@ create_tcp_client(saddr, port, prog, vers)
 }
 
 static int
-get_port_from_pmap(hostname, clntcreat, saddr, vers, proto)
+get_port_from_pmap(hostname, clntcreat, saddr, vers, proto, rpc_error_text)
 	const char *hostname;
 	CLIENT *(*clntcreat)();
 	const struct sockaddr_in *saddr;
 	int vers;
         int proto;
+        char **rpc_error_text;
 {
 	CLIENT *client;
 	struct pmap pmap;
@@ -466,7 +472,9 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers, proto)
 	if (clnt_call(client, PMAPPROC_GETPORT, (xdrproc_t)xdr_pmap,
 		      (caddr_t)&pmap, (xdrproc_t)xdr_u_short,
 		      (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
-		fprintf(stderr, "%s\n", clnt_sperror(client, hostname));
+                *rpc_error_text = clnt_sperror(client, hostname);
+                if (Dflg)
+                        fprintf(stderr, "portmapper returned: %s\n", *rpc_error_text);
 		clnt_destroy(client);
 		return 0;
 	}
@@ -489,6 +497,7 @@ chknfsmntproto(hostname, clntcreat, mount)
 	struct timeval tottimeout;
 	unsigned short port = 0;
         struct addrinfo *rp;
+        char *rpc_error_text = NULL;
 
 	if (mount->nfs_version < 4) {
                 rp = mount->mountaddr;
@@ -498,13 +507,43 @@ chknfsmntproto(hostname, clntcreat, mount)
                                                   create_tcp_client,
                                                   (struct sockaddr_in *)rp->ai_addr,
                                                   mount->nfs_version,
-                                                  mount->proto);
+                                                  mount->proto,
+                                                  &rpc_error_text);
                         if (port)
                                 break;
                         rp = rp->ai_next;
                 }
-                if (port == 0)
+                if (port == 0) {
+                        /* Let's look up hostname instead.  This happens when
+                           not on Linux (no mountaddr in mount options), also
+                           have observed rpcbind on OpenSolaris giving wrong
+                           answer on IPv6, claiming the NFS service doesn't
+                           support our NFS version.
+                        */
+                        struct addrinfo *hostaddr;
+                        if (translate_hostname(hostname, IPPROTO_TCP, &hostaddr) == 0)
+                                return 0;
+                        rp = hostaddr;
+                        while (rp) {
+                                /* always use TCP for portmap queries */
+                                port = get_port_from_pmap(hostname,
+                                                          create_tcp_client,
+                                                          (struct sockaddr_in *)rp->ai_addr,
+                                                          mount->nfs_version,
+                                                          mount->proto,
+                                                          &rpc_error_text);
+                                if (port)
+                                        break;
+                                rp = rp->ai_next;
+                        }
+                        if (hostaddr)
+                                freeaddrinfo(hostaddr);
+                }
+                if (port == 0) {
+                        if (rpc_error_text)
+                                fprintf(stderr, "%s\n", rpc_error_text);
                         return 0;
+                }
                 if (Dflg)
                         fprintf(stderr, "portmapper returned port %d\n", port);
 	} else {
@@ -525,7 +564,7 @@ chknfsmntproto(hostname, clntcreat, mount)
                 if (rpc_createerr.cf_stat == RPC_SUCCESS)
                         perror(hostname);
                 else
-                        fprintf(stderr, "%s\n", clnt_spcreateerror(hostname));
+                        clnt_pcreateerror(hostname);
 		return 0;
         }
 	/*
@@ -955,9 +994,13 @@ mkm_mlist()
 		}
 		{
 			const char *proto;
-			if ((proto = find_opt_val(mnt->mnt_opts, "proto")))
+			if ((proto = find_opt_val(mnt->mnt_opts, "proto"))) {
+				if (Dflg)
+					fprintf(stderr, "%s: proto is at '%s'\n",
+						mnt->mnt_fsname, proto);
 				mlist->proto = strncmp(proto, "tcp", 3) == 0 ?
 					IPPROTO_TCP : IPPROTO_UDP;
+                        }
 		}
 		{
 			char *addr;
