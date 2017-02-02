@@ -466,7 +466,7 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers, proto)
 	if (clnt_call(client, PMAPPROC_GETPORT, (xdrproc_t)xdr_pmap,
 		      (caddr_t)&pmap, (xdrproc_t)xdr_u_short,
 		      (caddr_t)&port, tottimeout) != RPC_SUCCESS) {
-		clnt_perror(client, hostname);
+		fprintf(stderr, "%s\n", clnt_sperror(client, hostname));
 		clnt_destroy(client);
 		return 0;
 	}
@@ -525,7 +525,7 @@ chknfsmntproto(hostname, clntcreat, mount)
                 if (rpc_createerr.cf_stat == RPC_SUCCESS)
                         perror(hostname);
                 else
-                        clnt_pcreateerror(hostname);
+                        fprintf(stderr, "%s\n", clnt_spcreateerror(hostname));
 		return 0;
         }
 	/*
