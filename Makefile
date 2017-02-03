@@ -24,7 +24,7 @@ SGI_CFLAGS = -I/usr/include/sun -I/usr/include/bsd
 # LIBS=
 
 
-CFLAGS = $(CDEBUGFLAGS) $(HPUX_CFLAGS) $(SGI_CFLAGS)
+CFLAGS = $(CDEBUGFLAGS) # $(HPUX_CFLAGS) $(SGI_CFLAGS)
 
 # Many but not all OS require -lnsl, so we test for existence of the
 # shared library.  HP-UX names it .sl, not .so

@@ -101,6 +101,11 @@
 # ifdef __osf__
 #  include <sys/mount.h>
 # endif
+# ifdef __NetBSD__
+#  include <sys/mount.h>
+#  include <nfs/rpcv2.h>
+#  include <rpcsvc/nfs_prot.h>
+# endif
 # include <nfs/nfs.h>
 #endif
 
@@ -1080,6 +1085,32 @@ mkm_mlist()
 		firstmnt = mlist;
 	}
 	free((char *)fs);
+}
+#elif defined (__NetBSD__)
+#include <sys/mount.h>
+void
+mkm_mlist()
+/*
+ * Build list of mnt entries - 4.4BSD version
+ */
+{
+	struct statvfs *fs;
+	int i, max;
+	struct m_mlist *mlist;
+
+	max = getmntinfo(&fs, ST_NOWAIT); /* use cached; do not query each file system */
+
+	for (i = 0; i < max; i++) {
+		mlist = (struct m_mlist *)xalloc(sizeof(struct m_mlist));
+		mlist->mlist_next = firstmnt;
+		mlist->mlist_checked = 0;
+		mlist->mlist_dir = xalloc (strlen (fs[i].f_mntonname) + 1);
+		(void) strcpy (mlist->mlist_dir, fs[i].f_mntonname);
+		mlist->mlist_fsname = xalloc (strlen (fs[i].f_mntfromname) + 1);
+		(void) strcpy (mlist->mlist_fsname, fs[i].f_mntfromname);
+		mlist->mlist_isnfs = (strcmp(fs[i].f_fstypename, "nfs") == 0);
+		firstmnt = mlist;
+	}
 }
 #else
 	UNDEFINED_mkm_mlist
