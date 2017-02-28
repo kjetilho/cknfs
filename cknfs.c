@@ -13,7 +13,7 @@
  * stdout.  No more hung logins!
  *
  * Usage: cknfs -e -s -t# -u -v -D -L paths
- *  
+ *
  *	 -e	silent, do not print paths
  *	 -f	accept any type of file, not just directories
  *	 -s	print paths in sh format (colons)
@@ -493,9 +493,9 @@ get_port_from_pmap(hostname, clntcreat, saddr, vers, proto, rpc_error_text)
 }
 
 static int
-chknfsmntproto(hostname, clntcreat, mount)
+chknfsmntproto(hostname, proto, mount)
      const char *hostname;
-     CLIENT *(*clntcreat)();
+     int proto;
      const struct m_mlist *mount;
 {
 	CLIENT *client;
@@ -503,8 +503,11 @@ chknfsmntproto(hostname, clntcreat, mount)
 	unsigned short port = 0;
         struct addrinfo *rp;
         char *rpc_error_text = NULL;
+        CLIENT *(*clntcreat)() = proto == IPPROTO_UDP ? create_udp_client : create_tcp_client;
 
-	if (mount->nfs_version < 4) {
+        assert(proto == IPPROTO_UDP || proto == IPPROTO_TCP);
+
+        if (mount->nfs_version < 4) {
                 rp = mount->mountaddr;
                 while (rp) {
                         /* always use TCP for portmap queries */
@@ -512,7 +515,7 @@ chknfsmntproto(hostname, clntcreat, mount)
                                                   create_tcp_client,
                                                   (struct sockaddr_in *)rp->ai_addr,
                                                   mount->nfs_version,
-                                                  mount->proto,
+                                                  proto,
                                                   &rpc_error_text);
                         if (port)
                                 break;
@@ -647,13 +650,11 @@ struct m_mlist *mlist;
 	}
 
 	if (mlist->proto) {
-		if (!chknfsmntproto(p, mlist->proto == IPPROTO_UDP ?
-				    create_udp_client : create_tcp_client,
-				    mlist))
+                if (!chknfsmntproto(p, mlist->proto, mlist))
 			return 0;
 	} else {
-		if (!chknfsmntproto(p, create_tcp_client, mlist) &&
-		    !chknfsmntproto(p, create_udp_client, mlist))
+                if (!chknfsmntproto(p, IPPROTO_TCP, mlist) &&
+                    !chknfsmntproto(p, IPPROTO_UDP, mlist))
 			return 0;
 	}
 
@@ -946,8 +947,8 @@ mkm_mlist()
 	mlist->mlist_dir = xalloc(strlen(mnt.mnt_mountp)+1);
 	(void) strcpy(mlist->mlist_dir, mnt.mnt_mountp);
 	mlist->mlist_fsname = xalloc(strlen(mnt.mnt_special)+1);
-	(void) strcpy(mlist->mlist_fsname, mnt.mnt_special);
-	if (strcmp(mnt.mnt_fstype, "nfs") == 0) {
+        (void) strcpy(mlist->mlist_fsname, mnt.mnt_special);
+        if (strcmp(mnt.mnt_fstype, "nfs") == 0 || strcmp(mnt.mnt_fstype, "nfs4") == 0) {
 	    mlist->mlist_isnfs = 1;
 	} else {
 	    mlist->mlist_isnfs = 0;
@@ -973,10 +974,12 @@ mkm_mlist()
 		exit(1);
 	}
 	while ((mnt = getmntent(mounted)) != NULL) {
-		mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
+                mlist = (struct m_mlist *)xalloc(sizeof(*mlist));
+                memset(mlist, 0, sizeof(struct m_mlist));
 		mlist->mlist_pid = 0;
 		mlist->nfs_version = 0;
-		mlist->mountaddr = NULL;
+                mlist->nfs_version = 0;
+                mlist->mountaddr = NULL;
 		/* remember the local automounter with funny entry.  Linux only? */
 		{
 			char dummy1[MAXPATHLEN];
@@ -986,35 +989,33 @@ mkm_mlist()
 				   dummy1, &pid) == 2) {
 				mlist->mlist_pid = pid;
 			}
-		}
+                }
+                if (strncmp(mnt->mnt_type, "nfs", 3) == 0)
 		{
-			const char *vers;
-			if ((vers = find_opt_val(mnt->mnt_opts, "vers")))
-				mlist->nfs_version = atoi(vers);
-			else if ((vers = find_opt_val(mnt->mnt_opts, "nfsvers")))
-				mlist->nfs_version = atoi(vers);
-			if (vers && Dflg)
+                        const char *opt;
+
+                        if ((opt = find_opt_val(mnt->mnt_opts, "vers")))
+                                mlist->nfs_version = atoi(opt);
+                        else if ((opt = find_opt_val(mnt->mnt_opts, "nfsvers")))
+                                mlist->nfs_version = atoi(opt);
+                        if (opt && Dflg)
 				fprintf(stderr, "%s: NFS version is %d\n",
 					mnt->mnt_fsname, mlist->nfs_version);
-		}
-		{
-			const char *proto;
-			if ((proto = find_opt_val(mnt->mnt_opts, "proto"))) {
+
+			if ((opt = find_opt_val(mnt->mnt_opts, "proto"))) {
 				if (Dflg)
 					fprintf(stderr, "%s: proto is at '%s'\n",
-						mnt->mnt_fsname, proto);
-				mlist->proto = strncmp(proto, "tcp", 3) == 0 ?
+						mnt->mnt_fsname, opt);
+				mlist->proto = strncmp(opt, "tcp", 3) == 0 ?
 					IPPROTO_TCP : IPPROTO_UDP;
                         }
-		}
-		{
-			char *addr;
-			if ((addr = copy_opt_val(mnt->mnt_opts, "mountaddr")) ||
-			    (addr = copy_opt_val(mnt->mnt_opts, "addr"))) {
+
+			if ((opt = copy_opt_val(mnt->mnt_opts, "mountaddr")) ||
+			    (opt = copy_opt_val(mnt->mnt_opts, "addr"))) {
 				if (Dflg)
 					fprintf(stderr, "%s: mountaddr is %s\n",
-						mnt->mnt_fsname, addr);
-                                translate_address(addr, mlist->proto, &mlist->mountaddr);
+						mnt->mnt_fsname, opt);
+                                translate_address(opt, mlist->proto, &mlist->mountaddr);
 			}
 		}
 		mlist->mlist_next = firstmnt;
